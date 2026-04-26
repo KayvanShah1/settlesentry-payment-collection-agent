@@ -21,6 +21,27 @@ LOG_RECORD_BUILTIN_KEYS = set(
         exc_info=None,
     ).__dict__.keys()
 )
+CONTEXT_EXCLUDED_KEYS = LOG_RECORD_BUILTIN_KEYS | {"message", "asctime"}
+
+
+class ContextAwareFormatter(logging.Formatter):
+    """
+    Appends custom `extra` fields to formatted log lines for traceability.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        base = super().format(record)
+
+        context_parts: list[str] = []
+        for key in sorted(record.__dict__.keys()):
+            if key in CONTEXT_EXCLUDED_KEYS:
+                continue
+            context_parts.append(f"{key}={record.__dict__[key]}")
+
+        if not context_parts:
+            return base
+
+        return f"{base} | {' '.join(context_parts)}"
 
 
 class SensitiveDataFilter(logging.Filter):
@@ -64,7 +85,7 @@ def get_logger(name: str) -> logging.Logger:
     if settings.logging.console_enabled:
         console_handler = RichHandler(rich_tracebacks=True)
         console_handler.setLevel(log_level)
-        console_handler.setFormatter(logging.Formatter("%(name)s - %(message)s"))
+        console_handler.setFormatter(ContextAwareFormatter("%(name)s - %(message)s"))
         console_handler.addFilter(redaction_filter)
         logger.addHandler(console_handler)
 
@@ -79,7 +100,7 @@ def get_logger(name: str) -> logging.Logger:
             encoding="utf-8",
         )
         file_handler.setLevel(log_level)
-        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+        file_handler.setFormatter(ContextAwareFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
         file_handler.addFilter(redaction_filter)
         logger.addHandler(file_handler)
 

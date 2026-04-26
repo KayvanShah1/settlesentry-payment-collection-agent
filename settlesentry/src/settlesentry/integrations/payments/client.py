@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from pydantic import ValidationError
@@ -61,6 +62,8 @@ class PaymentsClient:
         return self.client.post(url, json=payload, timeout=endpoint.timeout_seconds)
 
     def lookup_account(self, account_id: str) -> LookupResult:
+        operation_id = uuid4().hex[:12]
+
         try:
             request = AccountLookupRequest(account_id=account_id)
         except ValidationError:
@@ -74,7 +77,11 @@ class PaymentsClient:
 
         logger.info(
             "lookup_account_started",
-            extra={"account_id": request.account_id, "tool_name": endpoint.name.value},
+            extra={
+                "operation_id": operation_id,
+                "account_id": request.account_id,
+                "tool_name": endpoint.name.value,
+            },
         )
 
         try:
@@ -135,11 +142,13 @@ class PaymentsClient:
         )
 
     def process_payment(self, payment_request: PaymentRequest) -> PaymentResult:
+        operation_id = uuid4().hex[:12]
         endpoint = endpoints.get(EndpointName.PROCESS_PAYMENT)
 
         logger.info(
             "process_payment_started",
             extra={
+                "operation_id": operation_id,
                 "account_id": payment_request.account_id,
                 "amount": float(payment_request.amount),
                 "tool_name": endpoint.name.value,
