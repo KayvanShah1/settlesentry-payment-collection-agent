@@ -54,7 +54,7 @@ class PolicyDecision(BaseModel):
     def deny(
         cls,
         reason: PolicyReason,
-        failed_rule: str,
+        failed_rule: str | None = None,
         message: str | None = None,
     ) -> PolicyDecision:
         return cls(
@@ -84,15 +84,22 @@ class PolicySet:
             decision = rule.check(state)
 
             if not decision.allowed:
+                if decision.failed_rule is None:
+                    decision.failed_rule = rule.name
                 return decision
 
         return PolicyDecision.allow()
 
 
-def _deny(rule_name: str, reason: PolicyReason, message: str) -> PolicyDecision:
+def _deny(
+    *,
+    reason: PolicyReason,
+    message: str,
+    failed_rule: str | None = None,
+) -> PolicyDecision:
     return PolicyDecision.deny(
         reason=reason,
-        failed_rule=rule_name,
+        failed_rule=failed_rule,
         message=message,
     )
 
@@ -102,11 +109,10 @@ def _require_attempts_available(
     attempts: int,
     max_attempts: int,
     reason: PolicyReason,
-    rule_name: str,
     message: str,
 ) -> PolicyDecision:
     if attempts >= max_attempts:
-        return _deny(rule_name=rule_name, reason=reason, message=message)
+        return _deny(reason=reason, message=message)
 
     return PolicyDecision.allow()
 
@@ -114,7 +120,6 @@ def _require_attempts_available(
 def require_conversation_open(state: ConversationState) -> PolicyDecision:
     if state.completed:
         return _deny(
-            rule_name="require_conversation_open",
             reason=PolicyReason.CONVERSATION_CLOSED,
             message="This conversation is already closed.",
         )
@@ -125,7 +130,6 @@ def require_conversation_open(state: ConversationState) -> PolicyDecision:
 def require_account_id(state: ConversationState) -> PolicyDecision:
     if not state.account_id:
         return _deny(
-            rule_name="require_account_id",
             reason=PolicyReason.MISSING_ACCOUNT_ID,
             message="Account ID is required before account lookup.",
         )
@@ -136,7 +140,6 @@ def require_account_id(state: ConversationState) -> PolicyDecision:
 def require_account_not_loaded(state: ConversationState) -> PolicyDecision:
     if state.has_account_loaded():
         return _deny(
-            rule_name="require_account_not_loaded",
             reason=PolicyReason.ACCOUNT_ALREADY_LOADED,
             message="Account is already loaded.",
         )
@@ -147,7 +150,6 @@ def require_account_not_loaded(state: ConversationState) -> PolicyDecision:
 def require_account_loaded(state: ConversationState) -> PolicyDecision:
     if not state.has_account_loaded():
         return _deny(
-            rule_name="require_account_loaded",
             reason=PolicyReason.ACCOUNT_NOT_LOADED,
             message="Account lookup must succeed before this action.",
         )
@@ -160,7 +162,6 @@ def require_verification_attempts_available(state: ConversationState) -> PolicyD
         attempts=state.verification_attempts,
         max_attempts=settings.agent_policy.verification_max_attempts,
         reason=PolicyReason.VERIFICATION_ATTEMPTS_EXHAUSTED,
-        rule_name="require_verification_attempts_available",
         message="Verification attempts have been exhausted.",
     )
 
@@ -168,7 +169,6 @@ def require_verification_attempts_available(state: ConversationState) -> PolicyD
 def require_full_name(state: ConversationState) -> PolicyDecision:
     if not state.provided_full_name:
         return _deny(
-            rule_name="require_full_name",
             reason=PolicyReason.MISSING_FULL_NAME,
             message="Full name is required for identity verification.",
         )
@@ -179,7 +179,6 @@ def require_full_name(state: ConversationState) -> PolicyDecision:
 def require_secondary_factor(state: ConversationState) -> PolicyDecision:
     if not state.has_secondary_factor():
         return _deny(
-            rule_name="require_secondary_factor",
             reason=PolicyReason.MISSING_SECONDARY_FACTOR,
             message="At least one secondary verification factor is required.",
         )
@@ -190,7 +189,6 @@ def require_secondary_factor(state: ConversationState) -> PolicyDecision:
 def require_verified_identity(state: ConversationState) -> PolicyDecision:
     if not state.verified:
         return _deny(
-            rule_name="require_verified_identity",
             reason=PolicyReason.IDENTITY_NOT_VERIFIED,
             message="Identity must be verified before this action.",
         )
@@ -203,14 +201,12 @@ def require_positive_balance(state: ConversationState) -> PolicyDecision:
 
     if balance is None:
         return _deny(
-            rule_name="require_positive_balance",
             reason=PolicyReason.ACCOUNT_NOT_LOADED,
             message="Account balance is not available.",
         )
 
     if balance <= Decimal("0") and not settings.agent_policy.allow_zero_balance_payment:
         return _deny(
-            rule_name="require_positive_balance",
             reason=PolicyReason.ZERO_BALANCE,
             message="This account has no outstanding balance.",
         )
@@ -221,14 +217,12 @@ def require_positive_balance(state: ConversationState) -> PolicyDecision:
 def require_payment_amount(state: ConversationState) -> PolicyDecision:
     if state.payment_amount is None:
         return _deny(
-            rule_name="require_payment_amount",
             reason=PolicyReason.MISSING_PAYMENT_AMOUNT,
             message="Payment amount is required.",
         )
 
     if state.payment_amount <= Decimal("0"):
         return _deny(
-            rule_name="require_payment_amount",
             reason=PolicyReason.INVALID_PAYMENT_AMOUNT,
             message="Payment amount must be greater than zero.",
         )
@@ -241,14 +235,12 @@ def require_amount_within_balance(state: ConversationState) -> PolicyDecision:
 
     if balance is None:
         return _deny(
-            rule_name="require_amount_within_balance",
             reason=PolicyReason.ACCOUNT_NOT_LOADED,
             message="Account balance is not available.",
         )
 
     if state.payment_amount is not None and state.payment_amount > balance:
         return _deny(
-            rule_name="require_amount_within_balance",
             reason=PolicyReason.AMOUNT_EXCEEDS_BALANCE,
             message="Payment amount cannot exceed the outstanding balance.",
         )
@@ -264,7 +256,6 @@ def require_amount_within_policy_limit(state: ConversationState) -> PolicyDecisi
 
     if state.payment_amount > Decimal(str(max_amount)):
         return _deny(
-            rule_name="require_amount_within_policy_limit",
             reason=PolicyReason.AMOUNT_EXCEEDS_POLICY_LIMIT,
             message="Payment amount exceeds the configured policy limit.",
         )
@@ -275,7 +266,6 @@ def require_amount_within_policy_limit(state: ConversationState) -> PolicyDecisi
 def require_complete_card_fields(state: ConversationState) -> PolicyDecision:
     if not state.has_complete_card_fields():
         return _deny(
-            rule_name="require_complete_card_fields",
             reason=PolicyReason.MISSING_CARD_FIELDS,
             message="Cardholder name, card number, CVV, and expiry are required.",
         )
@@ -288,7 +278,6 @@ def require_valid_payment_request(state: ConversationState) -> PolicyDecision:
         state.build_payment_request()
     except ValueError as exc:
         return _deny(
-            rule_name="require_valid_payment_request",
             reason=PolicyReason.INVALID_PAYMENT_REQUEST,
             message=str(exc),
         )
@@ -299,7 +288,6 @@ def require_valid_payment_request(state: ConversationState) -> PolicyDecision:
 def require_payment_confirmation(state: ConversationState) -> PolicyDecision:
     if not state.payment_confirmed:
         return _deny(
-            rule_name="require_payment_confirmation",
             reason=PolicyReason.PAYMENT_NOT_CONFIRMED,
             message="User must explicitly confirm before payment is processed.",
         )
@@ -312,7 +300,6 @@ def require_payment_attempts_available(state: ConversationState) -> PolicyDecisi
         attempts=state.payment_attempts,
         max_attempts=settings.agent_policy.payment_max_attempts,
         reason=PolicyReason.PAYMENT_ATTEMPTS_EXHAUSTED,
-        rule_name="require_payment_attempts_available",
         message="Payment attempts have been exhausted.",
     )
 

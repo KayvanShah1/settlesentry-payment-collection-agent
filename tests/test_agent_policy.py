@@ -75,9 +75,11 @@ def test_prepare_and_process_policy_share_payment_request_guards():
 
     assert prepare_decision.allowed is False
     assert prepare_decision.reason == PolicyReason.MISSING_CARD_FIELDS
+    assert prepare_decision.failed_rule == "require_complete_card_fields"
 
     assert process_decision.allowed is False
     assert process_decision.reason == PolicyReason.MISSING_CARD_FIELDS
+    assert process_decision.failed_rule == "require_complete_card_fields"
 
 
 def test_verification_attempt_limit_rule():
