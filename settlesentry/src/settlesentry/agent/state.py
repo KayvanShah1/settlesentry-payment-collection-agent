@@ -13,6 +13,8 @@ from settlesentry.integrations.payments.schemas import (
     PaymentMethod,
     PaymentRequest,
     parse_decimal,
+    validate_fixed_digits,
+    validate_iso_date,
     validate_money,
 )
 from settlesentry.security.redaction import digits_only
@@ -112,6 +114,38 @@ class ExtractedUserInput(BaseModel):
         default=None,
         description="True only when the user explicitly confirms payment.",
     )
+
+    @field_validator("dob", "aadhaar_last4", "pincode", mode="before")
+    @classmethod
+    def parse_identity_fields(cls, value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+
+        return str(value)
+
+    @field_validator("dob")
+    @classmethod
+    def validate_dob(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        return validate_iso_date(value)
+
+    @field_validator("aadhaar_last4")
+    @classmethod
+    def validate_aadhaar_last4(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        return validate_fixed_digits(value, digits=4, field_name="aadhaar_last4")
+
+    @field_validator("pincode")
+    @classmethod
+    def validate_pincode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        return validate_fixed_digits(value, digits=6, field_name="pincode")
 
     @field_validator("payment_amount", mode="before")
     @classmethod

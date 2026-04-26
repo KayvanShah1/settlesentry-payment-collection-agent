@@ -99,3 +99,34 @@ def test_extracted_user_input_rejects_invalid_payment_amount():
 
     with pytest.raises(ValidationError):
         ExtractedUserInput(payment_amount="10.999")
+
+
+def test_extracted_user_input_accepts_valid_identity_fields():
+    extracted = ExtractedUserInput(
+        dob="1988-02-29",
+        aadhaar_last4="1357",
+        pincode="400004",
+    )
+
+    assert extracted.dob == "1988-02-29"
+    assert extracted.aadhaar_last4 == "1357"
+    assert extracted.pincode == "400004"
+
+
+def test_extracted_user_input_rejects_invalid_identity_field_formats():
+    with pytest.raises(ValidationError):
+        ExtractedUserInput(dob="1989-02-29")
+
+    with pytest.raises(ValidationError):
+        ExtractedUserInput(aadhaar_last4="43A1")
+
+    with pytest.raises(ValidationError):
+        ExtractedUserInput(pincode="40001")
+
+
+def test_extracted_user_input_treats_blank_identity_fields_as_none():
+    extracted = ExtractedUserInput(dob="", aadhaar_last4="", pincode="")
+
+    assert extracted.dob is None
+    assert extracted.aadhaar_last4 is None
+    assert extracted.pincode is None
