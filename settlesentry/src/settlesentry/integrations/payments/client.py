@@ -1,3 +1,12 @@
+"""
+HTTP client for the assignment payment APIs.
+
+Design goals:
+- normalize API outcomes into typed result objects
+- retry only safe/transient lookup calls
+- keep payment processing non-retryable to avoid duplicate charges
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -36,6 +45,7 @@ def _post_with_retry(
     payload: dict[str, Any],
     timeout_seconds: int,
 ) -> httpx.Response:
+    """POST JSON with retry on transient transport/server failures."""
     response = client.post(url, json=payload, timeout=timeout_seconds)
 
     if response.status_code in RETRYABLE_STATUS_CODES:
@@ -45,10 +55,14 @@ def _post_with_retry(
 
 
 class PaymentsClient:
+    """Facade over lookup/payment endpoints with policy-aware error handling."""
+
     def __init__(self, http_client: httpx.Client | None = None) -> None:
+        """Create client, allowing dependency injection for tests."""
         self.client = http_client or httpx.Client(timeout=settings.api.timeout_seconds)
 
     def _post_json(self, endpoint: EndpointSpec, payload: dict[str, Any]) -> httpx.Response:
+        """Dispatch POST request honoring endpoint-level retry policy."""
         url = endpoints.url_for(endpoint.name)
 
         if endpoint.retryable:
@@ -62,6 +76,12 @@ class PaymentsClient:
         return self.client.post(url, json=payload, timeout=endpoint.timeout_seconds)
 
     def lookup_account(self, account_id: str) -> LookupResult:
+        """
+        Look up account details by account id.
+
+        Returns a `LookupResult` instead of raising, so callers get deterministic
+        control-flow for both expected and unexpected API failures.
+        """
         operation_id = uuid4().hex[:12]
 
         try:
@@ -142,6 +162,12 @@ class PaymentsClient:
         )
 
     def process_payment(self, payment_request: PaymentRequest) -> PaymentResult:
+        """
+        Submit payment request once and map API responses to `PaymentResult`.
+
+        This call is intentionally non-retryable by default (see endpoint config)
+        to prevent accidental duplicate payment attempts.
+        """
         operation_id = uuid4().hex[:12]
         endpoint = endpoints.get(EndpointName.PROCESS_PAYMENT)
 
@@ -224,6 +250,7 @@ class PaymentsClient:
 
     @staticmethod
     def _parse_json(response: httpx.Response) -> dict[str, Any] | None:
+        """Parse response JSON if it is an object payload; otherwise return `None`."""
         try:
             data = response.json()
         except ValueError:
@@ -233,6 +260,7 @@ class PaymentsClient:
 
     @staticmethod
     def _payment_error_message(error_code: PaymentsAPIErrorCode) -> str:
+        """Map structured API error codes to user-facing failure text."""
         return {
             PaymentsAPIErrorCode.INVALID_AMOUNT: "The payment amount is invalid.",
             PaymentsAPIErrorCode.INSUFFICIENT_BALANCE: "The payment amount exceeds the outstanding balance.",

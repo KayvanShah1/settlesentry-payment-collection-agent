@@ -1,3 +1,9 @@
+"""
+Pydantic models and validators for payment API contracts.
+
+These schemas keep tool payloads strict, predictable, and easy to inspect.
+"""
+
 from __future__ import annotations
 
 import re
@@ -21,6 +27,8 @@ ACCOUNT_ID_RE = re.compile(r"^ACC\d+$")
 
 
 class PaymentsAPIErrorCode(StrEnum):
+    """Canonical error codes returned by lookup/payment flows."""
+
     ACCOUNT_NOT_FOUND = "account_not_found"
     INVALID_AMOUNT = "invalid_amount"
     INSUFFICIENT_BALANCE = "insufficient_balance"
@@ -34,6 +42,7 @@ class PaymentsAPIErrorCode(StrEnum):
 
 
 def validate_iso_date(value: str) -> str:
+    """Validate strict ISO date text (YYYY-MM-DD)."""
     try:
         date.fromisoformat(value)
     except ValueError as exc:
@@ -43,6 +52,7 @@ def validate_iso_date(value: str) -> str:
 
 
 def validate_money(value: Decimal) -> Decimal:
+    """Validate positive currency amount with at most two decimal places."""
     if value <= Decimal("0"):
         raise ValueError("Amount must be greater than zero")
 
@@ -53,6 +63,8 @@ def validate_money(value: Decimal) -> Decimal:
 
 
 class AccountLookupRequest(BaseModel):
+    """Request payload for account lookup tool call."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     account_id: str = Field(..., description="Account ID to look up")
@@ -67,6 +79,8 @@ class AccountLookupRequest(BaseModel):
 
 
 class AccountDetails(BaseModel):
+    """Normalized account details returned by successful account lookup."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     account_id: str
@@ -116,11 +130,15 @@ class AccountDetails(BaseModel):
 
 
 class AccountLookupError(BaseModel):
+    """Typed shape for known account lookup failure payloads."""
+
     error_code: Literal[PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND]
     message: str
 
 
 class CardDetails(BaseModel):
+    """Card fields with structural and business-rule validation."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     cardholder_name: str
@@ -195,11 +213,15 @@ class CardDetails(BaseModel):
 
 
 class PaymentMethod(BaseModel):
+    """Payment method envelope currently supporting card payments only."""
+
     type: Literal["card"] = "card"
     card: CardDetails
 
 
 class PaymentRequest(BaseModel):
+    """Request payload for payment processing tool call."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     account_id: str
@@ -230,16 +252,22 @@ class PaymentRequest(BaseModel):
 
 
 class PaymentSuccessResponse(BaseModel):
+    """Expected successful payment API payload shape."""
+
     success: Literal[True]
     transaction_id: str
 
 
 class PaymentFailureResponse(BaseModel):
+    """Expected failed payment API payload shape."""
+
     success: Literal[False]
     error_code: PaymentsAPIErrorCode
 
 
 class LookupResult(BaseModel):
+    """Internal normalized outcome for lookup step."""
+
     ok: bool
     account: AccountDetails | None = None
     error_code: PaymentsAPIErrorCode | None = None
@@ -248,6 +276,8 @@ class LookupResult(BaseModel):
 
 
 class PaymentResult(BaseModel):
+    """Internal normalized outcome for payment step."""
+
     ok: bool
     transaction_id: str | None = None
     error_code: PaymentsAPIErrorCode | None = None

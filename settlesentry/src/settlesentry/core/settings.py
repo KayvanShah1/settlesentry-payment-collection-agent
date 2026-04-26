@@ -62,7 +62,7 @@ class LoggingConfig(BaseProjectSettings):
 
 
 class APIConfig(BaseProjectSettings):
-    """Example of a sub-config for API endpoints."""
+    """External API configuration for the Prodigal payment verification API."""
 
     base_url: str = Field(
         default="https://se-payment-verification-api.service.external.usea2.aws.prodigaltech.com/openapi",

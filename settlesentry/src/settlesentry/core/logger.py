@@ -1,3 +1,9 @@
+"""
+Logging setup with two guarantees:
+1) sensitive values are redacted before emission
+2) custom context fields are surfaced for traceability
+"""
+
 import logging
 import logging.handlers
 from pathlib import Path
@@ -66,10 +72,16 @@ class SensitiveDataFilter(logging.Filter):
 
 
 def _get_log_level(level_name: str) -> int:
+    """Resolve configured level name into a logging module constant."""
     return getattr(logging, level_name.upper(), logging.INFO)
 
 
 def get_logger(name: str) -> logging.Logger:
+    """
+    Return a configured logger singleton for `name`.
+
+    The logger includes redaction and optional console/file handlers based on settings.
+    """
     logger = logging.getLogger(name)
 
     if logger.handlers:
