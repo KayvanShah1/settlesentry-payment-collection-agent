@@ -22,7 +22,7 @@ class EndpointSpec:
     retryable: bool = True
 
 
-PRODIGAL_ENDPOINTS: Mapping[EndpointName, EndpointSpec] = {
+ENDPOINT_SPECS: Mapping[EndpointName, EndpointSpec] = {
     EndpointName.LOOKUP_ACCOUNT: EndpointSpec(
         name=EndpointName.LOOKUP_ACCOUNT,
         method="POST",
@@ -44,7 +44,7 @@ class EndpointRegistry:
     def __init__(
         self,
         base_url: str,
-        endpoints: Mapping[EndpointName, EndpointSpec] = PRODIGAL_ENDPOINTS,
+        endpoints: Mapping[EndpointName, EndpointSpec] = ENDPOINT_SPECS,
     ) -> None:
         self.base_url = base_url.rstrip("/") + "/"
         self._endpoints = endpoints

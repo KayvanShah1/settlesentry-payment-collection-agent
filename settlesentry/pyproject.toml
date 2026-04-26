@@ -4,7 +4,13 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["pydantic-settings", "pydantic", "rich"]
+dependencies = [
+    "pydantic-settings",
+    "pydantic",
+    "rich",
+    "httpx>=0.28.1",
+    "tenacity>=9.1.4",
+]
 
 [build-system]
 requires = ["hatchling"]
