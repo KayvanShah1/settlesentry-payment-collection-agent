@@ -1,35 +1,45 @@
 import logging
 import logging.handlers
-import re
 from pathlib import Path
 
 from rich.logging import RichHandler
 
 from settlesentry.core.settings import settings
+from settlesentry.security.redaction import (
+    redact_sensitive_text,
+    redact_sensitive_value,
+)
 
-SENSITIVE_PATTERNS = [
-    # Card numbers: simple 13-19 digit matcher
-    (re.compile(r"\b\d{13,19}\b"), "[REDACTED_CARD]"),
-    # CVV mentions
-    (re.compile(r"(?i)(cvv\s*[:=]?\s*)\d{3,4}"), r"\1[REDACTED_CVV]"),
-    # Aadhaar last 4 mentions
-    (re.compile(r"(?i)(aadhaar(?:_last4| last 4)?\s*[:=]?\s*)\d{4}"), r"\1[REDACTED_AADHAAR_LAST4]"),
-    # DOB mentions
-    (re.compile(r"(?i)(dob|date of birth)\s*[:=]?\s*\d{4}-\d{2}-\d{2}"), r"\1=[REDACTED_DOB]"),
-    # Pincode mentions
-    (re.compile(r"(?i)(pincode\s*[:=]?\s*)\d{6}"), r"\1[REDACTED_PINCODE]"),
-]
+LOG_RECORD_BUILTIN_KEYS = set(
+    logging.LogRecord(
+        name="",
+        level=0,
+        pathname="",
+        lineno=0,
+        msg="",
+        args=(),
+        exc_info=None,
+    ).__dict__.keys()
+)
 
 
 class SensitiveDataFilter(logging.Filter):
+    """
+    Redacts sensitive data before records reach console or file handlers.
+    """
+
     def filter(self, record: logging.LogRecord) -> bool:
+        # Redact the rendered message.
         message = record.getMessage()
-
-        for pattern, replacement in SENSITIVE_PATTERNS:
-            message = pattern.sub(replacement, message)
-
-        record.msg = message
+        record.msg = redact_sensitive_text(message)
         record.args = ()
+
+        # Redact custom extra fields.
+        for key, value in list(record.__dict__.items()):
+            if key in LOG_RECORD_BUILTIN_KEYS:
+                continue
+
+            record.__dict__[key] = redact_sensitive_value(value, key_hint=key)
 
         return True
 
@@ -45,16 +55,17 @@ def get_logger(name: str) -> logging.Logger:
         return logger
 
     log_level = _get_log_level(settings.logging.level)
+    redaction_filter = SensitiveDataFilter()
 
     logger.setLevel(log_level)
     logger.propagate = False
-    logger.addFilter(SensitiveDataFilter())
+    logger.addFilter(redaction_filter)
 
     if settings.logging.console_enabled:
         console_handler = RichHandler(rich_tracebacks=True)
         console_handler.setLevel(log_level)
         console_handler.setFormatter(logging.Formatter("%(name)s - %(message)s"))
-        console_handler.addFilter(SensitiveDataFilter())
+        console_handler.addFilter(redaction_filter)
         logger.addHandler(console_handler)
 
     if settings.logging.file_enabled:
@@ -69,7 +80,7 @@ def get_logger(name: str) -> logging.Logger:
         )
         file_handler.setLevel(log_level)
         file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-        file_handler.addFilter(SensitiveDataFilter())
+        file_handler.addFilter(redaction_filter)
         logger.addHandler(file_handler)
 
     return logger
