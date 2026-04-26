@@ -98,7 +98,6 @@ def get_logger(name: str) -> logging.Logger:
         console_handler = RichHandler(rich_tracebacks=True)
         console_handler.setLevel(log_level)
         console_handler.setFormatter(ContextAwareFormatter("%(name)s - %(message)s"))
-        console_handler.addFilter(redaction_filter)
         logger.addHandler(console_handler)
 
     if settings.logging.file_enabled:
@@ -113,7 +112,6 @@ def get_logger(name: str) -> logging.Logger:
         )
         file_handler.setLevel(log_level)
         file_handler.setFormatter(ContextAwareFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-        file_handler.addFilter(redaction_filter)
         logger.addHandler(file_handler)
 
     return logger

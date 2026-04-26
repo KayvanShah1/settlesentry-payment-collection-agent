@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import StrEnum, auto
 from typing import Mapping
 from urllib.parse import urljoin
 
@@ -9,8 +9,8 @@ logger = get_logger("EndpointRegistry")
 
 
 class EndpointName(StrEnum):
-    LOOKUP_ACCOUNT = "lookup_account"
-    PROCESS_PAYMENT = "process_payment"
+    LOOKUP_ACCOUNT = auto()
+    PROCESS_PAYMENT = auto()
 
 
 @dataclass(frozen=True)

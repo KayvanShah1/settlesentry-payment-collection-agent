@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from decimal import Decimal
-from enum import StrEnum
+from enum import StrEnum, auto
 from typing import Literal
 
 from pydantic import (
@@ -29,16 +29,16 @@ ACCOUNT_ID_RE = re.compile(r"^ACC\d+$")
 class PaymentsAPIErrorCode(StrEnum):
     """Canonical error codes returned by lookup/payment flows."""
 
-    ACCOUNT_NOT_FOUND = "account_not_found"
-    INVALID_AMOUNT = "invalid_amount"
-    INSUFFICIENT_BALANCE = "insufficient_balance"
-    INVALID_CARD = "invalid_card"
-    INVALID_CVV = "invalid_cvv"
-    INVALID_EXPIRY = "invalid_expiry"
-    NETWORK_ERROR = "network_error"
-    TIMEOUT = "timeout"
-    INVALID_RESPONSE = "invalid_response"
-    UNEXPECTED_STATUS = "unexpected_status"
+    ACCOUNT_NOT_FOUND = auto()
+    INVALID_AMOUNT = auto()
+    INSUFFICIENT_BALANCE = auto()
+    INVALID_CARD = auto()
+    INVALID_CVV = auto()
+    INVALID_EXPIRY = auto()
+    NETWORK_ERROR = auto()
+    TIMEOUT = auto()
+    INVALID_RESPONSE = auto()
+    UNEXPECTED_STATUS = auto()
 
 
 def validate_iso_date(value: str) -> str:
@@ -62,6 +62,31 @@ def validate_money(value: Decimal) -> Decimal:
     return value
 
 
+def parse_decimal(value: object) -> Decimal:
+    """Coerce numeric-like values into Decimal without float precision loss."""
+    return Decimal(str(value))
+
+
+def validate_account_id_format(
+    value: str,
+    *,
+    error_message: str = "Account ID must look like ACC1001",
+) -> str:
+    """Validate canonical account ID text in ACC<digits> format."""
+    if not ACCOUNT_ID_RE.fullmatch(value):
+        raise ValueError(error_message)
+
+    return value
+
+
+def validate_fixed_digits(value: str, *, digits: int, field_name: str) -> str:
+    """Validate a numeric string with an exact fixed length."""
+    if not re.fullmatch(rf"\d{{{digits}}}", value):
+        raise ValueError(f"{field_name} must be exactly {digits} digits")
+
+    return value
+
+
 class AccountLookupRequest(BaseModel):
     """Request payload for account lookup tool call."""
 
@@ -72,10 +97,7 @@ class AccountLookupRequest(BaseModel):
     @field_validator("account_id")
     @classmethod
     def validate_account_id(cls, value: str) -> str:
-        if not ACCOUNT_ID_RE.fullmatch(value):
-            raise ValueError("Account ID must look like ACC1001")
-
-        return value
+        return validate_account_id_format(value)
 
 
 class AccountDetails(BaseModel):
@@ -93,10 +115,10 @@ class AccountDetails(BaseModel):
     @field_validator("account_id")
     @classmethod
     def validate_account_id(cls, value: str) -> str:
-        if not ACCOUNT_ID_RE.fullmatch(value):
-            raise ValueError("Invalid account_id in API response")
-
-        return value
+        return validate_account_id_format(
+            value,
+            error_message="Invalid account_id in API response",
+        )
 
     @field_validator("dob")
     @classmethod
@@ -106,23 +128,17 @@ class AccountDetails(BaseModel):
     @field_validator("aadhaar_last4")
     @classmethod
     def validate_aadhaar_last4(cls, value: str) -> str:
-        if not re.fullmatch(r"\d{4}", value):
-            raise ValueError("aadhaar_last4 must be exactly 4 digits")
-
-        return value
+        return validate_fixed_digits(value, digits=4, field_name="aadhaar_last4")
 
     @field_validator("pincode")
     @classmethod
     def validate_pincode(cls, value: str) -> str:
-        if not re.fullmatch(r"\d{6}", value):
-            raise ValueError("pincode must be exactly 6 digits")
-
-        return value
+        return validate_fixed_digits(value, digits=6, field_name="pincode")
 
     @field_validator("balance", mode="before")
     @classmethod
     def parse_balance(cls, value: object) -> Decimal:
-        return Decimal(str(value))
+        return parse_decimal(value)
 
     @field_serializer("balance")
     def serialize_balance(self, value: Decimal) -> float:
@@ -231,15 +247,12 @@ class PaymentRequest(BaseModel):
     @field_validator("account_id")
     @classmethod
     def validate_account_id(cls, value: str) -> str:
-        if not ACCOUNT_ID_RE.fullmatch(value):
-            raise ValueError("Account ID must look like ACC1001")
-
-        return value
+        return validate_account_id_format(value)
 
     @field_validator("amount", mode="before")
     @classmethod
     def parse_amount(cls, value: object) -> Decimal:
-        return Decimal(str(value))
+        return parse_decimal(value)
 
     @field_validator("amount")
     @classmethod

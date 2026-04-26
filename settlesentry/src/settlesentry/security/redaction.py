@@ -63,6 +63,13 @@ PINCODE_RE = re.compile(
     r"\b"
 )
 
+LABEL_REPLACEMENT_PATTERNS = (
+    (CVV_RE, "[REDACTED_CVV]"),
+    (AADHAAR_LAST4_RE, "[REDACTED_AADHAAR_LAST4]"),
+    (DOB_RE, "[REDACTED_DOB]"),
+    (PINCODE_RE, "[REDACTED_PINCODE]"),
+)
+
 
 def digits_only(value: str) -> str:
     return re.sub(r"\D", "", value)
@@ -105,16 +112,12 @@ def _redact_card(match: re.Match[str]) -> str:
 
 def redact_sensitive_text(text: str) -> str:
     redacted = CARD_CONTEXT_RE.sub(_redact_card, text)
-    redacted = CVV_RE.sub(lambda match: _mask_match(match, "[REDACTED_CVV]"), redacted)
-    redacted = AADHAAR_LAST4_RE.sub(
-        lambda match: _mask_match(match, "[REDACTED_AADHAAR_LAST4]"),
-        redacted,
-    )
-    redacted = DOB_RE.sub(lambda match: _mask_match(match, "[REDACTED_DOB]"), redacted)
-    redacted = PINCODE_RE.sub(
-        lambda match: _mask_match(match, "[REDACTED_PINCODE]"),
-        redacted,
-    )
+
+    for pattern, replacement in LABEL_REPLACEMENT_PATTERNS:
+        redacted = pattern.sub(
+            lambda match, token=replacement: _mask_match(match, token),
+            redacted,
+        )
 
     return redacted
 
