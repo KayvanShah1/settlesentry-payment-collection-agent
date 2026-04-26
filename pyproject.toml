@@ -4,4 +4,29 @@ version = "0.1.0"
 description = "SettleSentry: Payment Collection Agent - A policy-governed AI payment collection agent with strict identity verification, safe tool calls, and deterministic payment flow control."
 readme = "README.md"
 requires-python = ">=3.14"
+license = { file = "LICENSE" }
 dependencies = []
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.1.0",
+    "pandas>=3.0.2",
+    "pyarrow>=23.0.1",
+    "pytest>=9.0.0",
+    "ruff>=0.14.9",
+    "sqlfmt>=0.0.3",
+]
+
+[tool.ruff]
+extend-include = ["*.ipynb"]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 120
+quote-style = "double"
+
+[tool.ruff.lint.pycodestyle]
+# But override the linter's enforced line length to 10.
+max-line-length = 120
