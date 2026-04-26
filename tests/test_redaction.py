@@ -21,6 +21,11 @@ def test_card_number_is_redacted_in_context():
     assert redact_sensitive_text(raw) == "card_number=[REDACTED_CARD]"
 
 
+def test_invalid_card_number_is_redacted_when_labeled():
+    raw = "card_number=1234567890123456"
+    assert redact_sensitive_text(raw) == "card_number=[REDACTED_CARD]"
+
+
 def test_large_decimal_amount_is_not_redacted_as_card():
     raw = "amount=17693696986376890.90"
     assert redact_sensitive_text(raw) == raw
@@ -70,3 +75,26 @@ def test_logging_filter_redacts_rendered_message():
 
     assert record.msg == "card_number=[REDACTED_CARD] cvv=[REDACTED_CVV]"
     assert record.args == ()
+
+
+def test_logging_filter_redacts_extra_fields():
+    record = logging.LogRecord(
+        name="test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="safe message",
+        args=(),
+        exc_info=None,
+    )
+    record.card_number = "4532015112830366"
+    record.payload = {
+        "cvv": "123",
+        "metadata": "dob=1990-05-14",
+    }
+
+    SensitiveDataFilter().filter(record)
+
+    assert record.card_number == "[REDACTED]"
+    assert record.payload["cvv"] == "[REDACTED]"
+    assert record.payload["metadata"] == "dob=[REDACTED_DOB]"

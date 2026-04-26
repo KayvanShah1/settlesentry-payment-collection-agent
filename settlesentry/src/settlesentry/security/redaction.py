@@ -99,11 +99,7 @@ def _mask_match(match: re.Match[str], mask: str) -> str:
 
 
 def _redact_card(match: re.Match[str]) -> str:
-    card_number = match.group("value")
-
-    if not luhn_valid(card_number):
-        return match.group(0)
-
+    # In card-labeled contexts we always redact to avoid leaking PAN-like values.
     return _mask_match(match, "[REDACTED_CARD]")
 
 
