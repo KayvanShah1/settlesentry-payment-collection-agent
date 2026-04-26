@@ -3,7 +3,7 @@ name = "settlesentry-payment-collection-agent"
 version = "0.1.0"
 description = "SettleSentry: Payment Collection Agent - A policy-governed AI payment collection agent with strict identity verification, safe tool calls, and deterministic payment flow control."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 dependencies = []
 
@@ -23,3 +23,6 @@ quote-style = "double"
 [tool.ruff.lint.pycodestyle]
 # But override the linter's enforced line length to 10.
 max-line-length = 120
+
+[tool.uv.workspace]
+members = ["settlesentry"]
