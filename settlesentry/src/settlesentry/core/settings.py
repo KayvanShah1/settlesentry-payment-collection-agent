@@ -64,11 +64,14 @@ class LoggingConfig(BaseProjectSettings):
 class APIConfig(BaseProjectSettings):
     """Example of a sub-config for API endpoints."""
 
-    base_url: str = Field(default="https://api.example.com", description="Base URL for the payment verification API")
+    base_url: str = Field(
+        default="https://se-payment-verification-api.service.external.usea2.aws.prodigaltech.com/openapi",
+        description="Base URL for the Prodigal payment verification API",
+    )
     timeout_seconds: int = Field(default=30, ge=1, le=120, description="Timeout for API requests in seconds")
     max_retries: int = Field(default=2, ge=0, le=5, description="Maximum number of retries for API requests")
 
-    model_config = SettingsConfigDict(env_prefix="API_ENDPOINT_")  # Prefix for env vars
+    model_config = SettingsConfigDict(env_prefix="API_")  # Prefix for env vars
 
 
 class LLMConfig(BaseProjectSettings):
@@ -123,10 +126,10 @@ class Settings(BaseProjectSettings):
     log_dir: Path = Field(default=project_root / "var" / "logs")
 
     # Sub-configs
-    api: APIConfig = APIConfig()
-    llm: LLMConfig = LLMConfig()
-    logging: LoggingConfig = LoggingConfig()
-    agent_policy: AgentPolicyConfig = AgentPolicyConfig()
+    api: APIConfig = Field(default_factory=APIConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    agent_policy: AgentPolicyConfig = Field(default_factory=AgentPolicyConfig)
 
     def model_post_init(self, __context):
         """Ensure directories exist on startup."""
