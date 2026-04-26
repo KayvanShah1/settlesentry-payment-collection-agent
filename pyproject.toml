@@ -8,14 +8,7 @@ license = { file = "LICENSE" }
 dependencies = []
 
 [dependency-groups]
-dev = [
-    "ipykernel>=7.1.0",
-    "pandas>=3.0.2",
-    "pyarrow>=23.0.1",
-    "pytest>=9.0.0",
-    "ruff>=0.14.9",
-    "sqlfmt>=0.0.3",
-]
+dev = ["ipykernel>=7.1.0", "pytest>=9.0.0", "ruff>=0.14.9"]
 
 [tool.ruff]
 extend-include = ["*.ipynb"]
