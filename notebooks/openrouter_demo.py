@@ -161,8 +161,8 @@ def parse_args() -> argparse.Namespace:
         "--models",
         nargs="*",
         default=[
-            "openrouter/free",
-            "openai/gpt-oss-120b:free",
+            # "openrouter/free",
+            # "openai/gpt-oss-120b:free",
             "openai/gpt-oss-20b:free",
         ],
         help="Free models to test. Defaults to configured free model (if any), openrouter/free, and Nemotron free.",
