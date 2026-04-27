@@ -2,6 +2,7 @@ import json
 
 import httpx
 import pytest
+import settlesentry.integrations.payments.client as payments_client_module
 from settlesentry.core import settings
 from settlesentry.integrations.payments.client import PaymentsClient
 from settlesentry.integrations.payments.schemas import CardDetails, PaymentMethod, PaymentRequest, PaymentsAPIErrorCode
@@ -318,3 +319,85 @@ def test_process_payment_server_error_is_not_retried():
     assert result.error_code == PaymentsAPIErrorCode.UNEXPECTED_STATUS
     assert result.status_code == 503
     assert calls["count"] == 1
+
+
+def test_lookup_account_logs_started_and_completed_events(monkeypatch: pytest.MonkeyPatch):
+    emitted: list[tuple[str, dict]] = []
+
+    def fake_info(message, *args, **kwargs):
+        emitted.append((message, kwargs.get("extra", {})))
+
+    monkeypatch.setattr(payments_client_module.logger, "info", fake_info)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            200,
+            {
+                "account_id": "ACC1001",
+                "full_name": "Nithin Jain",
+                "dob": "1990-05-14",
+                "aadhaar_last4": "4321",
+                "pincode": "400001",
+                "balance": 1250.75,
+            },
+        )
+
+    result = make_client(handler).lookup_account("ACC1001")
+    assert result.ok is True
+
+    started = [extra for message, extra in emitted if message == "lookup_account_started"]
+    completed = [extra for message, extra in emitted if message == "lookup_account_completed"]
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert completed[0]["ok"] is True
+    assert completed[0]["status_code"] == 200
+    assert completed[0]["http_call_made"] is True
+    assert isinstance(completed[0]["duration_ms"], int)
+
+
+def test_lookup_account_logs_validation_failure_without_http_call(monkeypatch: pytest.MonkeyPatch):
+    emitted: list[tuple[str, dict]] = []
+
+    def fake_info(message, *args, **kwargs):
+        emitted.append((message, kwargs.get("extra", {})))
+
+    monkeypatch.setattr(payments_client_module.logger, "info", fake_info)
+
+    result = make_client(lambda _request: json_response(500, {"message": "unused"})).lookup_account("bad-id")
+    assert result.ok is False
+
+    failed = [extra for message, extra in emitted if message == "lookup_account_failed"]
+    assert len(failed) == 1
+    assert failed[0]["http_call_made"] is False
+    assert failed[0]["error_code"] == PaymentsAPIErrorCode.INVALID_RESPONSE.value
+    assert failed[0]["status_code"] is None
+
+
+def test_process_payment_logs_started_and_completed_events(monkeypatch: pytest.MonkeyPatch):
+    emitted: list[tuple[str, dict]] = []
+
+    def fake_info(message, *args, **kwargs):
+        emitted.append((message, kwargs.get("extra", {})))
+
+    monkeypatch.setattr(payments_client_module.logger, "info", fake_info)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            200,
+            {
+                "success": True,
+                "transaction_id": "txn_test_123",
+            },
+        )
+
+    result = make_client(handler).process_payment(make_payment_request())
+    assert result.ok is True
+
+    started = [extra for message, extra in emitted if message == "process_payment_started"]
+    completed = [extra for message, extra in emitted if message == "process_payment_completed"]
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert completed[0]["ok"] is True
+    assert completed[0]["status_code"] == 200
+    assert completed[0]["transaction_id"] == "txn_test_123"
+    assert isinstance(completed[0]["duration_ms"], int)

@@ -55,6 +55,10 @@ class LoggingConfig(BaseProjectSettings):
     level: str = Field(default="INFO")
     file_enabled: bool = Field(default=True)
     console_enabled: bool = Field(default=True)
+    file_name: str | None = Field(
+        default=None,
+        description="Optional explicit log filename. Defaults to '<project_name>.log' when unset.",
+    )
     max_bytes: int = Field(default=2000 * 1024)
     backup_count: int = Field(default=5)
 

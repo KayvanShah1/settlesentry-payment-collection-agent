@@ -34,9 +34,19 @@ class CombinedInputParser:
 
                 return ExtractedUserInput.model_validate(primary_output)
             except Exception as exc:
+                expected_fields = None
+                current_step = None
+                if context is not None:
+                    current_step = context.current_step
+                    if context.expected_fields:
+                        expected_fields = ",".join(context.expected_fields)
                 logger.warning(
                     "llm_parser_fallback",
-                    extra={"error_type": type(exc).__name__},
+                    extra={
+                        "error_type": type(exc).__name__,
+                        "current_step": current_step,
+                        "expected_fields": expected_fields,
+                    },
                 )
 
         return self.fallback.extract(user_input, context)
@@ -63,7 +73,9 @@ def build_input_parser() -> InputParser:
         except Exception as exc:
             logger.warning(
                 "llm_parser_disabled_fallback",
-                extra={"error_type": type(exc).__name__},
+                extra={
+                    "error_type": type(exc).__name__,
+                },
             )
 
     return fallback

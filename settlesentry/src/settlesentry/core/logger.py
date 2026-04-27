@@ -101,7 +101,8 @@ def get_logger(name: str) -> logging.Logger:
         logger.addHandler(console_handler)
 
     if settings.logging.file_enabled:
-        log_path = Path(settings.log_dir) / f"{settings.project_name}.log"
+        log_filename = settings.logging.file_name or f"{settings.project_name}.log"
+        log_path = Path(settings.log_dir) / log_filename
 
         file_handler = logging.handlers.RotatingFileHandler(
             filename=log_path,

@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+import settlesentry.agent.policy as policy_module
 from settlesentry.agent.policy import (
     PREPARE_PAYMENT_POLICY,
     PROCESS_PAYMENT_POLICY,
@@ -139,6 +140,28 @@ def test_prepare_policy_rejects_extremely_large_amount_before_request_build():
     assert decision.allowed is False
     assert decision.reason == PolicyReason.AMOUNT_EXCEEDS_BALANCE
     assert decision.failed_rule == "require_amount_within_balance"
+
+
+def test_policy_set_logs_denied_decision_with_reason(monkeypatch: pytest.MonkeyPatch):
+    emitted: list[tuple[str, dict]] = []
+
+    def fake_info(message, *args, **kwargs):
+        emitted.append((message, kwargs.get("extra", {})))
+
+    monkeypatch.setattr(policy_module.logger, "info", fake_info)
+
+    state = make_verified_state()
+    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
+
+    assert decision.allowed is False
+    assert decision.reason == PolicyReason.MISSING_CARD_FIELDS
+
+    policy_logs = [extra for message, extra in emitted if message == "policy_decision"]
+    assert len(policy_logs) == 1
+    assert policy_logs[0]["policy_name"] == "prepare_payment"
+    assert policy_logs[0]["allowed"] is False
+    assert policy_logs[0]["reason"] == PolicyReason.MISSING_CARD_FIELDS.value
+    assert policy_logs[0]["failed_rule"] == "require_complete_card_fields"
 
 
 def test_reveal_balance_denies_when_identity_not_verified():

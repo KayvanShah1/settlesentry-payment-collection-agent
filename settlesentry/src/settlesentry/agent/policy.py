@@ -8,7 +8,9 @@ from enum import StrEnum, auto
 from pydantic import BaseModel, ValidationError
 
 from settlesentry.agent.state import ConversationState
-from settlesentry.core import settings
+from settlesentry.core import get_logger, settings
+
+logger = get_logger("AgentPolicy")
 
 
 class PolicyReason(StrEnum):
@@ -78,14 +80,38 @@ class PolicySet:
     name: str
     rules: tuple[PolicyRule, ...]
 
+    def _log_decision(self, state: ConversationState, decision: PolicyDecision) -> None:
+        log = logger.debug if decision.allowed else logger.info
+        log(
+            "policy_decision",
+            extra={
+                "policy_name": self.name,
+                "allowed": decision.allowed,
+                "reason": decision.reason.value,
+                "failed_rule": decision.failed_rule,
+                "state_step": state.step.value,
+                "account_id": state.account_id,
+                "verified": state.verified,
+                "payment_confirmed": state.payment_confirmed,
+                "verification_attempts": state.verification_attempts,
+                "payment_attempts": state.payment_attempts,
+            },
+        )
+
     def evaluate(self, state: ConversationState) -> PolicyDecision:
         for rule in self.rules:
             decision = rule.check(state)
 
             if not decision.allowed:
-                return decision.model_copy(update={"failed_rule": rule.name})
+                resolved = decision
+                if resolved.failed_rule is None:
+                    resolved = resolved.model_copy(update={"failed_rule": rule.name})
+                self._log_decision(state, resolved)
+                return resolved
 
-        return PolicyDecision.allow()
+        allowed = PolicyDecision.allow()
+        self._log_decision(state, allowed)
+        return allowed
 
 
 def _deny(

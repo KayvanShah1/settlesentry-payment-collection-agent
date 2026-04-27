@@ -9,6 +9,7 @@ Design goals:
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
@@ -61,6 +62,64 @@ class PaymentsClient:
         """Create client, allowing dependency injection for tests."""
         self.client = http_client or httpx.Client(timeout=settings.api.timeout_seconds)
 
+    @staticmethod
+    def _duration_ms(started_at: float) -> int:
+        return int((perf_counter() - started_at) * 1000)
+
+    @staticmethod
+    def _error_code_value(error_code: PaymentsAPIErrorCode | None) -> str | None:
+        return error_code.value if error_code is not None else None
+
+    def _log_lookup_outcome(
+        self,
+        *,
+        operation_id: str,
+        endpoint: EndpointSpec,
+        account_id: str,
+        result: LookupResult,
+        started_at: float,
+        http_call_made: bool,
+    ) -> None:
+        logger.info(
+            "lookup_account_completed" if result.ok else "lookup_account_failed",
+            extra={
+                "operation_id": operation_id,
+                "account_id": account_id,
+                "tool_name": endpoint.name.value,
+                "ok": result.ok,
+                "status_code": result.status_code,
+                "error_code": self._error_code_value(result.error_code),
+                "duration_ms": self._duration_ms(started_at),
+                "http_call_made": http_call_made,
+            },
+        )
+
+    def _log_payment_outcome(
+        self,
+        *,
+        operation_id: str,
+        endpoint: EndpointSpec,
+        payment_request: PaymentRequest,
+        result: PaymentResult,
+        started_at: float,
+        http_call_made: bool,
+    ) -> None:
+        logger.info(
+            "process_payment_completed" if result.ok else "process_payment_failed",
+            extra={
+                "operation_id": operation_id,
+                "account_id": payment_request.account_id,
+                "amount": float(payment_request.amount),
+                "tool_name": endpoint.name.value,
+                "ok": result.ok,
+                "status_code": result.status_code,
+                "error_code": self._error_code_value(result.error_code),
+                "transaction_id": result.transaction_id,
+                "duration_ms": self._duration_ms(started_at),
+                "http_call_made": http_call_made,
+            },
+        )
+
     def _post_json(self, endpoint: EndpointSpec, payload: dict[str, Any]) -> httpx.Response:
         """Dispatch POST request honoring endpoint-level retry policy."""
         url = endpoints.url_for(endpoint.name)
@@ -83,40 +142,65 @@ class PaymentsClient:
         control-flow for both expected and unexpected API failures.
         """
         operation_id = uuid4().hex[:12]
-
-        try:
-            request = AccountLookupRequest(account_id=account_id)
-        except ValidationError:
-            return LookupResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
-                message="Invalid account ID format.",
-            )
-
         endpoint = endpoints.get(EndpointName.LOOKUP_ACCOUNT)
+        started_at = perf_counter()
 
         logger.info(
             "lookup_account_started",
             extra={
                 "operation_id": operation_id,
-                "account_id": request.account_id,
+                "account_id": account_id,
                 "tool_name": endpoint.name.value,
+                "retryable": endpoint.retryable,
+                "max_retries": settings.api.max_retries if endpoint.retryable else 0,
             },
         )
+
+        def finalize(result: LookupResult, *, resolved_account_id: str, http_call_made: bool) -> LookupResult:
+            self._log_lookup_outcome(
+                operation_id=operation_id,
+                endpoint=endpoint,
+                account_id=resolved_account_id,
+                result=result,
+                started_at=started_at,
+                http_call_made=http_call_made,
+            )
+            return result
+
+        try:
+            request = AccountLookupRequest(account_id=account_id)
+        except ValidationError:
+            return finalize(
+                LookupResult(
+                    ok=False,
+                    error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
+                    message="Invalid account ID format.",
+                ),
+                resolved_account_id=account_id,
+                http_call_made=False,
+            )
 
         try:
             response = self._post_json(endpoint, request.model_dump(mode="json"))
         except httpx.TimeoutException:
-            return LookupResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.TIMEOUT,
-                message="Account lookup timed out. Please try again.",
+            return finalize(
+                LookupResult(
+                    ok=False,
+                    error_code=PaymentsAPIErrorCode.TIMEOUT,
+                    message="Account lookup timed out. Please try again.",
+                ),
+                resolved_account_id=request.account_id,
+                http_call_made=True,
             )
         except httpx.RequestError:
-            return LookupResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.NETWORK_ERROR,
-                message="Account lookup failed due to a network error.",
+            return finalize(
+                LookupResult(
+                    ok=False,
+                    error_code=PaymentsAPIErrorCode.NETWORK_ERROR,
+                    message="Account lookup failed due to a network error.",
+                ),
+                resolved_account_id=request.account_id,
+                http_call_made=True,
             )
         except httpx.HTTPStatusError as exc:
             response = exc.response
@@ -124,41 +208,61 @@ class PaymentsClient:
         data = self._parse_json(response)
 
         if data is None:
-            return LookupResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
-                message="Account lookup returned an invalid response.",
-                status_code=response.status_code,
+            return finalize(
+                LookupResult(
+                    ok=False,
+                    error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
+                    message="Account lookup returned an invalid response.",
+                    status_code=response.status_code,
+                ),
+                resolved_account_id=request.account_id,
+                http_call_made=True,
             )
 
         if response.status_code == 200:
             try:
-                return LookupResult(
-                    ok=True,
-                    account=AccountDetails.model_validate(data),
-                    status_code=response.status_code,
+                return finalize(
+                    LookupResult(
+                        ok=True,
+                        account=AccountDetails.model_validate(data),
+                        status_code=response.status_code,
+                    ),
+                    resolved_account_id=request.account_id,
+                    http_call_made=True,
                 )
             except ValidationError:
-                return LookupResult(
-                    ok=False,
-                    error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
-                    message="Account lookup returned an unexpected response.",
-                    status_code=response.status_code,
+                return finalize(
+                    LookupResult(
+                        ok=False,
+                        error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
+                        message="Account lookup returned an unexpected response.",
+                        status_code=response.status_code,
+                    ),
+                    resolved_account_id=request.account_id,
+                    http_call_made=True,
                 )
 
         if response.status_code == 404:
-            return LookupResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND,
-                message=data.get("message", "No account found with the provided account ID."),
-                status_code=response.status_code,
+            return finalize(
+                LookupResult(
+                    ok=False,
+                    error_code=PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND,
+                    message=data.get("message", "No account found with the provided account ID."),
+                    status_code=response.status_code,
+                ),
+                resolved_account_id=request.account_id,
+                http_call_made=True,
             )
 
-        return LookupResult(
-            ok=False,
-            error_code=PaymentsAPIErrorCode.UNEXPECTED_STATUS,
-            message=f"Unexpected account lookup status: {response.status_code}.",
-            status_code=response.status_code,
+        return finalize(
+            LookupResult(
+                ok=False,
+                error_code=PaymentsAPIErrorCode.UNEXPECTED_STATUS,
+                message=f"Unexpected account lookup status: {response.status_code}.",
+                status_code=response.status_code,
+            ),
+            resolved_account_id=request.account_id,
+            http_call_made=True,
         )
 
     def process_payment(self, payment_request: PaymentRequest) -> PaymentResult:
@@ -170,6 +274,7 @@ class PaymentsClient:
         """
         operation_id = uuid4().hex[:12]
         endpoint = endpoints.get(EndpointName.PROCESS_PAYMENT)
+        started_at = perf_counter()
 
         logger.info(
             "process_payment_started",
@@ -178,22 +283,41 @@ class PaymentsClient:
                 "account_id": payment_request.account_id,
                 "amount": float(payment_request.amount),
                 "tool_name": endpoint.name.value,
+                "retryable": endpoint.retryable,
+                "max_retries": settings.api.max_retries if endpoint.retryable else 0,
             },
         )
+
+        def finalize(result: PaymentResult, *, http_call_made: bool) -> PaymentResult:
+            self._log_payment_outcome(
+                operation_id=operation_id,
+                endpoint=endpoint,
+                payment_request=payment_request,
+                result=result,
+                started_at=started_at,
+                http_call_made=http_call_made,
+            )
+            return result
 
         try:
             response = self._post_json(endpoint, payment_request.model_dump(mode="json"))
         except httpx.TimeoutException:
-            return PaymentResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.TIMEOUT,
-                message="Payment request timed out. I cannot safely retry it automatically.",
+            return finalize(
+                PaymentResult(
+                    ok=False,
+                    error_code=PaymentsAPIErrorCode.TIMEOUT,
+                    message="Payment request timed out. I cannot safely retry it automatically.",
+                ),
+                http_call_made=True,
             )
         except httpx.RequestError:
-            return PaymentResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.NETWORK_ERROR,
-                message="Payment request failed due to a network error.",
+            return finalize(
+                PaymentResult(
+                    ok=False,
+                    error_code=PaymentsAPIErrorCode.NETWORK_ERROR,
+                    message="Payment request failed due to a network error.",
+                ),
+                http_call_made=True,
             )
         except httpx.HTTPStatusError as exc:
             response = exc.response
@@ -201,51 +325,69 @@ class PaymentsClient:
         data = self._parse_json(response)
 
         if data is None:
-            return PaymentResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
-                message="Payment API returned an invalid response.",
-                status_code=response.status_code,
+            return finalize(
+                PaymentResult(
+                    ok=False,
+                    error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
+                    message="Payment API returned an invalid response.",
+                    status_code=response.status_code,
+                ),
+                http_call_made=True,
             )
 
         if response.status_code == 200:
             try:
                 result = PaymentSuccessResponse.model_validate(data)
-                return PaymentResult(
-                    ok=True,
-                    transaction_id=result.transaction_id,
-                    status_code=response.status_code,
+                return finalize(
+                    PaymentResult(
+                        ok=True,
+                        transaction_id=result.transaction_id,
+                        status_code=response.status_code,
+                    ),
+                    http_call_made=True,
                 )
             except ValidationError:
-                return PaymentResult(
-                    ok=False,
-                    error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
-                    message="Payment API returned an unexpected success response.",
-                    status_code=response.status_code,
+                return finalize(
+                    PaymentResult(
+                        ok=False,
+                        error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
+                        message="Payment API returned an unexpected success response.",
+                        status_code=response.status_code,
+                    ),
+                    http_call_made=True,
                 )
 
         if response.status_code == 422:
             try:
                 failure = PaymentFailureResponse.model_validate(data)
-                return PaymentResult(
-                    ok=False,
-                    error_code=failure.error_code,
-                    message=self._payment_error_message(failure.error_code),
-                    status_code=response.status_code,
+                return finalize(
+                    PaymentResult(
+                        ok=False,
+                        error_code=failure.error_code,
+                        message=self._payment_error_message(failure.error_code),
+                        status_code=response.status_code,
+                    ),
+                    http_call_made=True,
                 )
             except ValidationError:
-                return PaymentResult(
-                    ok=False,
-                    error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
-                    message="Payment API returned an invalid failure response.",
-                    status_code=response.status_code,
+                return finalize(
+                    PaymentResult(
+                        ok=False,
+                        error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
+                        message="Payment API returned an invalid failure response.",
+                        status_code=response.status_code,
+                    ),
+                    http_call_made=True,
                 )
 
-        return PaymentResult(
-            ok=False,
-            error_code=PaymentsAPIErrorCode.UNEXPECTED_STATUS,
-            message=f"Unexpected payment status: {response.status_code}.",
-            status_code=response.status_code,
+        return finalize(
+            PaymentResult(
+                ok=False,
+                error_code=PaymentsAPIErrorCode.UNEXPECTED_STATUS,
+                message=f"Unexpected payment status: {response.status_code}.",
+                status_code=response.status_code,
+            ),
+            http_call_made=True,
         )
 
     @staticmethod
