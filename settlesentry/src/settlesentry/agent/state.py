@@ -20,7 +20,7 @@ from settlesentry.security.identity import (
     validate_fixed_digits,
     validate_iso_date,
 )
-from settlesentry.security.redaction import digits_only
+from settlesentry.security.cards import digits_only
 
 EXTRACTED_TO_STATE_FIELD_MAP = {
     "account_id": "account_id",

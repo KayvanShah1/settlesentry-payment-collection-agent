@@ -21,8 +21,8 @@ from pydantic import (
     model_validator,
 )
 
+from settlesentry.security.cards import digits_only, luhn_valid
 from settlesentry.security.identity import validate_fixed_digits, validate_iso_date
-from settlesentry.security.redaction import digits_only, luhn_valid
 
 ACCOUNT_ID_RE = re.compile(r"^ACC\d+$")
 

@@ -1,8 +1,8 @@
 import logging
 
 from settlesentry.core.logger import SensitiveDataFilter
+from settlesentry.security.cards import luhn_valid
 from settlesentry.security.redaction import (
-    luhn_valid,
     redact_sensitive_text,
     redact_sensitive_value,
 )

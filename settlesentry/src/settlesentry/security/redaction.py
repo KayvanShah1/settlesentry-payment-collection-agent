@@ -71,32 +71,6 @@ LABEL_REPLACEMENT_PATTERNS = (
 )
 
 
-def digits_only(value: str) -> str:
-    return re.sub(r"\D", "", value)
-
-
-def luhn_valid(value: str) -> bool:
-    digits = digits_only(value)
-
-    if not 13 <= len(digits) <= 19:
-        return False
-
-    checksum = 0
-    parity = len(digits) % 2
-
-    for index, char in enumerate(digits):
-        digit = int(char)
-
-        if index % 2 == parity:
-            digit *= 2
-            if digit > 9:
-                digit -= 9
-
-        checksum += digit
-
-    return checksum % 10 == 0
-
-
 def _mask_match(match: re.Match[str], mask: str) -> str:
     label = match.group("label")
     sep = match.group("sep")
