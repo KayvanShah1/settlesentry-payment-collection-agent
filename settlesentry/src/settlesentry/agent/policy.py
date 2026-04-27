@@ -279,6 +279,23 @@ def require_valid_payment_request(state: ConversationState) -> PolicyDecision:
     return PolicyDecision.allow()
 
 
+def require_partial_payment_policy(state: ConversationState) -> PolicyDecision:
+    balance = state.outstanding_balance()
+
+    if (
+        balance is not None
+        and state.payment_amount is not None
+        and not settings.agent_policy.allow_partial_payments
+        and state.payment_amount != balance
+    ):
+        return _deny(
+            reason=PolicyReason.PARTIAL_PAYMENT_NOT_ALLOWED,
+            message="Partial payments are not allowed by policy.",
+        )
+
+    return PolicyDecision.allow()
+
+
 def require_payment_confirmation(state: ConversationState) -> PolicyDecision:
     if not state.payment_confirmed:
         return _deny(
