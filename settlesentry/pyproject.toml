@@ -1,7 +1,7 @@
 [project]
 name = "settlesentry"
 version = "0.1.0"
-description = "Add your description here"
+description = "Policy-governed payment collection agent with strict identity verification and safe tool calls."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,6 +10,7 @@ dependencies = [
     "rich",
     "httpx>=0.28.1",
     "tenacity>=9.1.4",
+    "pydantic-ai-slim[openrouter]>=1.87.0",
 ]
 
 [build-system]
