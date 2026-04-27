@@ -349,6 +349,7 @@ PAYMENT_ELIGIBILITY_RULES = COMMON_VERIFIED_ACCOUNT_RULES + (
 COMMON_PAYMENT_REQUEST_RULES = (
     PolicyRule("require_payment_amount", require_payment_amount),
     PolicyRule("require_amount_within_balance", require_amount_within_balance),
+    PolicyRule("require_partial_payment_policy", require_partial_payment_policy),
     PolicyRule("require_amount_within_policy_limit", require_amount_within_policy_limit),
     PolicyRule("require_complete_card_fields", require_complete_card_fields),
     PolicyRule("require_valid_payment_request", require_valid_payment_request),
