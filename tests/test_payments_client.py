@@ -165,6 +165,23 @@ def test_lookup_account_200_with_unexpected_shape_returns_invalid_response():
     assert result.error_code == PaymentsAPIErrorCode.INVALID_RESPONSE
 
 
+def test_lookup_account_invalid_account_id_is_rejected_before_api_call():
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return json_response(500, {"message": "should not be called"})
+
+    client = make_client(handler)
+
+    result = client.lookup_account("not-an-account-id")
+
+    assert result.ok is False
+    assert result.error_code == PaymentsAPIErrorCode.INVALID_RESPONSE
+    assert result.message == "Invalid account ID format."
+    assert calls["count"] == 0
+
+
 def test_process_payment_success():
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content.decode("utf-8"))

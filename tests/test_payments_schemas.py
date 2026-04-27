@@ -87,3 +87,59 @@ def test_amex_accepts_four_digit_cvv():
     )
 
     assert card.card_number == "378282246310005"
+
+
+def test_amex_rejects_three_digit_cvv():
+    with pytest.raises(ValidationError, match="Amex cards require a 4-digit CVV"):
+        CardDetails(
+            cardholder_name="Nithin Jain",
+            card_number="378282246310005",
+            cvv="123",
+            expiry_month=12,
+            expiry_year=date.today().year + 1,
+        )
+
+
+def test_card_expiry_current_month_is_valid():
+    today = date.today()
+    card = CardDetails(
+        cardholder_name="Nithin Jain",
+        card_number="4532015112830366",
+        cvv="123",
+        expiry_month=today.month,
+        expiry_year=today.year,
+    )
+
+    assert card.expiry_month == today.month
+    assert card.expiry_year == today.year
+
+
+def test_card_expiry_previous_month_is_rejected():
+    today = date.today()
+    expiry_year = today.year
+    expiry_month = today.month - 1
+
+    if today.month == 1:
+        expiry_year = today.year - 1
+        expiry_month = 12
+
+    with pytest.raises(ValidationError, match="Card has expired"):
+        CardDetails(
+            cardholder_name="Nithin Jain",
+            card_number="4532015112830366",
+            cvv="123",
+            expiry_month=expiry_month,
+            expiry_year=expiry_year,
+        )
+
+
+def test_card_number_with_spaces_and_hyphens_is_normalized():
+    card = CardDetails(
+        cardholder_name="Nithin Jain",
+        card_number="4532 0151-1283 0366",
+        cvv="123",
+        expiry_month=12,
+        expiry_year=date.today().year + 1,
+    )
+
+    assert card.card_number == "4532015112830366"
