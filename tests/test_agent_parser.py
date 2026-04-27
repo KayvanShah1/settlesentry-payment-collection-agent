@@ -201,6 +201,7 @@ def test_invalid_pincode_does_not_crash_parser(parser: DeterministicInputParser)
         ("payment amount is 500", Decimal("500")),
         ("amount=500.50", Decimal("500.50")),
         ("pay 1,250.75", Decimal("1250.75")),
+        ("pay 1,23,250.75", Decimal("123250.75")),
         ("settle 1250.75", Decimal("1250.75")),
         ("collect Rs. 300", Decimal("300")),
     ],
