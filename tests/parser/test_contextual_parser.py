@@ -105,7 +105,7 @@ def test_bare_card_number_is_extracted_when_expected():
 
     result = parser.extract("4532 0151 1283 0366", context=context)
 
-    assert result.card_number == "4532 0151 1283 0366"
+    assert result.card_number == "4532015112830366"
     assert result.intent == UserIntent.MAKE_PAYMENT
 
 
@@ -194,7 +194,7 @@ def test_card_form_style_reply_is_mapped_by_expected_order():
     )
 
     assert result.cardholder_name == "Nithin Jain"
-    assert result.card_number == "4532 0151 1283 0366"
+    assert result.card_number == "4532015112830366"
     assert result.cvv == "123"
     assert result.expiry_month == 12
     assert result.expiry_year == 2027
@@ -226,7 +226,7 @@ def test_ordered_form_amount_with_thousands_separator_and_card_number():
     result = parser.extract("1,250.75, 4532 0151 1283 0366", context=context)
 
     assert result.payment_amount == Decimal("1250.75")
-    assert result.card_number == "4532 0151 1283 0366"
+    assert result.card_number == "4532015112830366"
 
 
 def test_ordered_form_amount_with_indian_separator_and_card_number():
@@ -239,7 +239,7 @@ def test_ordered_form_amount_with_indian_separator_and_card_number():
     result = parser.extract("1,23,250.75, 4532 0151 1283 0366", context=context)
 
     assert result.payment_amount == Decimal("123250.75")
-    assert result.card_number == "4532 0151 1283 0366"
+    assert result.card_number == "4532015112830366"
 
 
 def test_ordered_form_with_fewer_values_than_expected():
@@ -280,7 +280,7 @@ def test_ordered_form_handles_mixed_delimiters():
     result = parser.extract("1,250.75; 4532 0151 1283 0366\n123;12/2027", context=context)
 
     assert result.payment_amount == Decimal("1250.75")
-    assert result.card_number == "4532 0151 1283 0366"
+    assert result.card_number == "4532015112830366"
     assert result.cvv == "123"
     assert result.expiry_month == 12
     assert result.expiry_year == 2027

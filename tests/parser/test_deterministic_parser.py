@@ -243,8 +243,8 @@ def test_payment_amount_without_payment_context_is_not_extracted(parser: Determi
     ("text", "expected_card"),
     [
         ("card number=4532015112830366", "4532015112830366"),
-        ("card number is 4532 0151 1283 0366", "4532 0151 1283 0366"),
-        ("credit card: 4532-0151-1283-0366", "4532-0151-1283-0366"),
+        ("card number is 4532 0151 1283 0366", "4532015112830366"),
+        ("credit card: 4532-0151-1283-0366", "4532015112830366"),
         ("debit card 4532015112830366", "4532015112830366"),
     ],
 )
@@ -367,7 +367,7 @@ def test_complete_payment_message_extracts_multiple_fields(parser: Deterministic
 
     assert result.payment_amount == Decimal("500")
     assert result.cardholder_name == "Nithin Jain"
-    assert result.card_number == "4532 0151 1283 0366"
+    assert result.card_number == "4532015112830366"
     assert result.cvv == "123"
     assert result.expiry_month == 12
     assert result.expiry_year == 2027

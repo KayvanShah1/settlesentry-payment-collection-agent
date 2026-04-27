@@ -155,13 +155,30 @@ class ExtractedUserInput(BaseModel):
 
         return parse_decimal(value)
 
+    @field_validator("card_number", mode="before")
+    @classmethod
+    def normalize_card_number(cls, value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+
+        text = str(value).strip()
+        if not text:
+            return None
+
+        if all(char.isdigit() or char in {" ", "-"} for char in text):
+            digits = digits_only(text)
+            return digits if digits else None
+
+        return text
+
     @field_validator("payment_amount")
     @classmethod
     def validate_payment_amount(cls, value: Decimal | None) -> Decimal | None:
         if value is None:
             return None
 
-        return validate_money(value)
+        validated = validate_money(value)
+        return validated.quantize(Decimal("0.01"))
 
 
 class ConversationState(BaseModel):
