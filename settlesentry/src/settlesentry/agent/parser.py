@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
-import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from settlesentry.agent.actions import ProposedAction, UserIntent
 from settlesentry.agent.state import ConversationState, ExtractedUserInput
@@ -76,9 +76,7 @@ EXPIRY_RE = re.compile(
     r"(?i)\b(?:expiry|exp|valid\s+till)\s*(?:is|:|=)?\s*"
     r"(?P<month>0?[1-9]|1[0-2])\s*(?:/|-|\s+)\s*(?P<year>\d{2}|\d{4})\b"
 )
-BARE_EXPIRY_RE = re.compile(
-    r"^\s*(?P<month>0?[1-9]|1[0-2])\s*(?:/|-|\s+)\s*(?P<year>\d{2}|\d{4})\s*$"
-)
+BARE_EXPIRY_RE = re.compile(r"^\s*(?P<month>0?[1-9]|1[0-2])\s*(?:/|-|\s+)\s*(?P<year>\d{2}|\d{4})\s*$")
 
 CARDHOLDER_RE = re.compile(
     r"(?i)\b(?:cardholder|card\s+holder|name\s+on\s+card)\s*(?:name)?\s*(?:is|:|=)?\s*"
@@ -180,8 +178,7 @@ class ParserContext(BaseModel):
 class InputParser(Protocol):
     """Common parser interface used by the agent service."""
 
-    def extract(self, user_input: str, context: ParserContext | None = None) -> ExtractedUserInput:
-        ...
+    def extract(self, user_input: str, context: ParserContext | None = None) -> ExtractedUserInput: ...
 
 
 class DeterministicInputParser:
@@ -370,13 +367,17 @@ class DeterministicInputParser:
             self._set_intent_from_expected_fields(context.expected_fields, extracted)
 
     @staticmethod
-    def _set_intent_from_expected_fields(expected_fields: tuple[ExpectedField, ...], extracted: dict[str, object]) -> None:
+    def _set_intent_from_expected_fields(
+        expected_fields: tuple[ExpectedField, ...], extracted: dict[str, object]
+    ) -> None:
         if any(field in expected_fields for field in ("full_name", "dob", "aadhaar_last4", "pincode")):
             extracted.setdefault("intent", UserIntent.VERIFY_IDENTITY)
             extracted.setdefault("proposed_action", ProposedAction.VERIFY_IDENTITY)
             return
 
-        if any(field in expected_fields for field in ("payment_amount", "cardholder_name", "card_number", "cvv", "expiry")):
+        if any(
+            field in expected_fields for field in ("payment_amount", "cardholder_name", "card_number", "cvv", "expiry")
+        ):
             extracted.setdefault("intent", UserIntent.MAKE_PAYMENT)
             extracted.setdefault("proposed_action", ProposedAction.PREPARE_PAYMENT)
             return
@@ -455,79 +456,67 @@ class DeterministicInputParser:
             return ExtractedUserInput.model_validate(sanitized)
 
 
-class OpenRouterInputParser:
+class PydanticAIInputParser:
     """
-    LLM-first parser using OpenRouter's OpenAI-compatible chat endpoint.
+    LLM-first parser using PydanticAI and OpenRouter.
 
     The LLM only extracts fields and proposes an action. It must not verify
     identity, reveal balance, or authorize payment. The policy layer owns those
     decisions.
     """
 
-    def __init__(self, http_client: httpx.Client | None = None) -> None:
-        self.client = http_client or httpx.Client(timeout=settings.llm.timeout_seconds)
+    def __init__(self) -> None:
+        api_key = settings.llm.api_key.get_secret_value() if settings.llm.api_key else None
+        if not api_key:
+            raise RuntimeError("PydanticAI parser requires OPENROUTER_API_KEY")
+
+        # PydanticAI's OpenRouter provider reads OPENROUTER_API_KEY from the
+        # process environment. settings.py may load it from .env without
+        # exporting it, so set a process-local value here.
+        os.environ.setdefault("OPENROUTER_API_KEY", api_key)
+
+        from pydantic_ai import Agent
+
+        self.agent = Agent(
+            self._model_name(),
+            output_type=ExtractedUserInput,
+            instructions=self._instructions(),
+        )
 
     def extract(self, user_input: str, context: ParserContext | None = None) -> ExtractedUserInput:
         if context is None:
             context = self._empty_context()
 
-        api_key = settings.llm.api_key.get_secret_value() if settings.llm.api_key else None
-        if not api_key:
-            raise RuntimeError("OpenRouter parser requires OPENROUTER_API_KEY")
+        result = self.agent.run_sync(self._user_prompt(user_input, context))
+        output = getattr(result, "output", None)
 
-        payload = self._build_payload(user_input, context)
-        response = self.client.post(
-            f"{settings.llm.base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=settings.llm.timeout_seconds,
-        )
-        response.raise_for_status()
+        # Compatibility fallback for older PydanticAI result objects.
+        if output is None:
+            output = getattr(result, "data", None)
 
-        raw_content = self._extract_content(response)
-        parsed = self._parse_json_object(raw_content)
+        if isinstance(output, ExtractedUserInput):
+            return output
 
-        return ExtractedUserInput.model_validate(parsed)
-
-    def _build_payload(self, user_input: str, context: ParserContext) -> dict[str, Any]:
-        return {
-            "model": settings.llm.model,
-            "temperature": settings.llm.temperature,
-            "max_tokens": settings.llm.max_tokens,
-            "messages": [
-                {"role": "system", "content": self._system_prompt()},
-                {"role": "user", "content": self._user_prompt(user_input, context)},
-            ],
-        }
+        return ExtractedUserInput.model_validate(output)
 
     @staticmethod
-    def _system_prompt() -> str:
+    def _model_name() -> str:
+        if settings.llm.model.startswith("openrouter:"):
+            return settings.llm.model
+
+        return f"openrouter:{settings.llm.model}"
+
+    @staticmethod
+    def _instructions() -> str:
         allowed_intents = ", ".join(intent.value for intent in UserIntent)
         allowed_actions = ", ".join(action.value for action in ProposedAction)
 
         return f"""
 You are a structured parser for a payment collection agent.
 
-Return exactly one JSON object matching this schema:
-{{
-  "intent": one of [{allowed_intents}],
-  "proposed_action": one of [{allowed_actions}],
-  "account_id": string or null,
-  "full_name": string or null,
-  "dob": YYYY-MM-DD string or null,
-  "aadhaar_last4": four digit string or null,
-  "pincode": six digit string or null,
-  "payment_amount": number or string or null,
-  "cardholder_name": string or null,
-  "card_number": string or null,
-  "cvv": string or null,
-  "expiry_month": integer or null,
-  "expiry_year": four digit integer or null,
-  "confirmation": true, false, or null
-}}
+Return an ExtractedUserInput object using these allowed values:
+- intent: one of [{allowed_intents}]
+- proposed_action: one of [{allowed_actions}]
 
 Rules:
 - Extract only values explicitly present in the latest user message or clearly implied by the last assistant question.
@@ -540,7 +529,6 @@ Rules:
 - You may propose a tool-relevant action, but policy code will approve or block it.
 - If the user explicitly confirms payment, set confirmation=true and proposed_action=process_payment.
 - If the user cancels/stops, use intent=cancel and proposed_action=cancel.
-- Output only valid JSON. No markdown.
 """.strip()
 
     @staticmethod
@@ -557,37 +545,6 @@ Rules:
             ensure_ascii=False,
             indent=2,
         )
-
-    @staticmethod
-    def _extract_content(response: httpx.Response) -> str:
-        data = response.json()
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError("OpenRouter response did not contain assistant content") from exc
-
-        if not isinstance(content, str):
-            raise ValueError("OpenRouter assistant content was not text")
-
-        return content
-
-    @staticmethod
-    def _parse_json_object(content: str) -> dict[str, Any]:
-        text = content.strip()
-
-        if text.startswith("```"):
-            text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-            text = re.sub(r"\s*```$", "", text)
-
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError("LLM parser returned invalid JSON") from exc
-
-        if not isinstance(data, dict):
-            raise ValueError("LLM parser did not return a JSON object")
-
-        return data
 
     @staticmethod
     def _empty_context() -> ParserContext:
@@ -627,9 +584,13 @@ def build_input_parser() -> InputParser:
     LLM parsing is enabled only when both OPENROUTER_ENABLED=true and an API key
     are configured. Otherwise the deterministic parser is used directly.
     """
+
     fallback = DeterministicInputParser()
 
     if settings.llm.enabled and settings.llm.api_key:
-        return CombinedInputParser(primary=OpenRouterInputParser(), fallback=fallback)
+        return CombinedInputParser(
+            primary=PydanticAIInputParser(),
+            fallback=fallback,
+        )
 
     return fallback
