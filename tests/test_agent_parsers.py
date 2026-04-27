@@ -68,6 +68,9 @@ def test_parser_context_from_state_is_privacy_aware():
     dumped = context.model_dump()
     assert "card_number" not in dumped["state_summary"]
     assert "cvv" not in dumped["state_summary"]
+    assert "dob" not in dumped["state_summary"]
+    assert "aadhaar_last4" not in dumped["state_summary"]
+    assert "pincode" not in dumped["state_summary"]
 
 
 def test_deterministic_parser_extracts_bare_dob_when_context_expects_it():
@@ -123,6 +126,54 @@ def test_deterministic_parser_extracts_ordered_form_values_in_expected_order():
     assert result.dob == "1990-05-14"
     assert result.full_name == "Nithin Jain"
     assert result.card_number == "4532015112830366"
+
+
+def test_deterministic_parser_extracts_identity_form_style_reply():
+    parser = DeterministicInputParser()
+    context = _context(expected_fields=("dob", "aadhaar_last4", "pincode"))
+
+    result = parser.extract("1990-05-14, 4321, 400001", context)
+
+    assert result.dob == "1990-05-14"
+    assert result.aadhaar_last4 == "4321"
+    assert result.pincode == "400001"
+
+
+def test_deterministic_parser_extracts_identity_form_style_reply_with_name():
+    parser = DeterministicInputParser()
+    context = _context(expected_fields=("full_name", "dob", "pincode"))
+
+    result = parser.extract("Nithin Jain, 1990-05-14, 400001", context)
+
+    assert result.full_name == "Nithin Jain"
+    assert result.dob == "1990-05-14"
+    assert result.pincode == "400001"
+
+
+def test_deterministic_parser_extracts_card_form_style_reply():
+    parser = DeterministicInputParser()
+    context = _context(expected_fields=("cardholder_name", "card_number", "cvv", "expiry"))
+
+    result = parser.extract("Nithin Jain, 4532 0151 1283 0366, 123, 12/2027", context)
+
+    assert result.cardholder_name == "Nithin Jain"
+    assert result.card_number == "4532 0151 1283 0366"
+    assert result.cvv == "123"
+    assert result.expiry_month == 12
+    assert result.expiry_year == 2027
+
+
+def test_deterministic_parser_disambiguates_4321_from_expected_field():
+    parser = DeterministicInputParser()
+
+    aadhaar_result = parser.extract("4321", _context(expected_fields=("aadhaar_last4",)))
+    cvv_result = parser.extract("4321", _context(expected_fields=("cvv",)))
+
+    assert aadhaar_result.aadhaar_last4 == "4321"
+    assert aadhaar_result.cvv is None
+
+    assert cvv_result.cvv == "4321"
+    assert cvv_result.aadhaar_last4 is None
 
 
 def test_deterministic_parser_handles_thousands_separator_in_ordered_form_amount():

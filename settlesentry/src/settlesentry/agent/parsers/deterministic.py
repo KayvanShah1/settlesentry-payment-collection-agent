@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 from decimal import Decimal, InvalidOperation
@@ -173,6 +173,7 @@ class DeterministicInputParser:
 
         if len(context.expected_fields) > 1 and len(parts) > 1:
             self._extract_ordered_form_parts(parts, context.expected_fields, extracted)
+            return
 
         for field in context.expected_fields:
             if self._field_already_extracted(field, extracted):

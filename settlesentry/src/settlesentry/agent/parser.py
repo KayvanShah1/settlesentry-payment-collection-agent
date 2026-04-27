@@ -34,7 +34,7 @@ class CombinedInputParser:
 
                 return ExtractedUserInput.model_validate(primary_output)
             except Exception as exc:
-                logger.info(
+                logger.warning(
                     "llm_parser_fallback",
                     extra={"error_type": type(exc).__name__},
                 )
@@ -61,7 +61,7 @@ def build_input_parser() -> InputParser:
                 fallback=fallback,
             )
         except Exception as exc:
-            logger.info(
+            logger.warning(
                 "llm_parser_disabled_fallback",
                 extra={"error_type": type(exc).__name__},
             )

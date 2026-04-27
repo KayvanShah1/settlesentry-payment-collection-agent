@@ -6,7 +6,6 @@ from settlesentry.agent.parsers.base import (
     ParserStateSummary,
 )
 from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.parsers.llm import PydanticAIInputParser
 
 __all__ = [
     "ConversationTurn",
@@ -15,5 +14,4 @@ __all__ = [
     "ParserContext",
     "ParserStateSummary",
     "DeterministicInputParser",
-    "PydanticAIInputParser",
 ]

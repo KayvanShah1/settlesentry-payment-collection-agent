@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 from settlesentry.agent.actions import ProposedAction, UserIntent
-from settlesentry.agent.parser import DeterministicInputParser
+from settlesentry.agent.parsers.deterministic import DeterministicInputParser
 from settlesentry.agent.state import ExtractedUserInput
 
 

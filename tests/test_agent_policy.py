@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from settlesentry.agent.policy import (
     PREPARE_PAYMENT_POLICY,
     PROCESS_PAYMENT_POLICY,
+    REVEAL_BALANCE_POLICY,
     PolicyReason,
     identity_matches_account,
     require_payment_attempts_available,
@@ -138,3 +139,54 @@ def test_prepare_policy_rejects_extremely_large_amount_before_request_build():
     assert decision.allowed is False
     assert decision.reason == PolicyReason.AMOUNT_EXCEEDS_BALANCE
     assert decision.failed_rule == "require_amount_within_balance"
+
+
+def test_reveal_balance_denies_when_identity_not_verified():
+    state = ConversationState(
+        account_id="ACC1001",
+        account=make_account(),
+        verified=False,
+    )
+
+    decision = REVEAL_BALANCE_POLICY.evaluate(state)
+
+    assert decision.allowed is False
+    assert decision.reason == PolicyReason.IDENTITY_NOT_VERIFIED
+    assert decision.failed_rule == "require_verified_identity"
+
+
+def test_process_payment_denies_when_not_confirmed_after_valid_request():
+    state = ConversationState(
+        account_id="ACC1001",
+        account=make_account(),
+        verified=True,
+        payment_amount=Decimal("100.00"),
+        cardholder_name="Nithin Jain",
+        card_number="4532015112830366",
+        cvv="123",
+        expiry_month=12,
+        expiry_year=2027,
+        payment_confirmed=False,
+    )
+
+    decision = PROCESS_PAYMENT_POLICY.evaluate(state)
+
+    assert decision.allowed is False
+    assert decision.reason == PolicyReason.PAYMENT_NOT_CONFIRMED
+    assert decision.failed_rule == "require_payment_confirmation"
+
+
+def test_prepare_payment_denies_when_balance_is_zero(monkeypatch: pytest.MonkeyPatch):
+    state = ConversationState(
+        account_id="ACC1003",
+        account=make_account(balance="0"),
+        verified=True,
+        payment_amount=Decimal("1.00"),
+    )
+    monkeypatch.setattr(settings.agent_policy, "allow_zero_balance_payment", False)
+
+    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
+
+    assert decision.allowed is False
+    assert decision.reason == PolicyReason.ZERO_BALANCE
+    assert decision.failed_rule == "require_positive_balance"
