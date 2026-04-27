@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import os
+from pydantic_ai import Agent
+from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from settlesentry.agent.parsers.base import ParserContext
 from settlesentry.agent.parsers.prompts import build_parser_instructions, build_parser_user_prompt
@@ -22,17 +24,22 @@ class PydanticAIInputParser:
         if not api_key:
             raise RuntimeError("PydanticAI parser requires OPENROUTER_API_KEY")
 
-        # PydanticAI's OpenRouter provider reads OPENROUTER_API_KEY from the
-        # process environment. settings.py may load it from .env without
-        # exporting it, so set a process-local value here.
-        os.environ.setdefault("OPENROUTER_API_KEY", api_key)
-
-        from pydantic_ai import Agent
-
         self.agent = Agent(
-            self._model_name(),
+            model=OpenRouterModel(
+                model_name=settings.llm.model,
+                provider=OpenRouterProvider(
+                    api_key=api_key,
+                ),
+                settings=OpenRouterModelSettings(
+                    temperature=settings.llm.temperature,
+                    max_tokens=settings.llm.max_tokens,
+                    timeout=settings.llm.timeout_seconds,
+                ),
+            ),
             output_type=ExtractedUserInput,
             instructions=build_parser_instructions(),
+            name="ParserAgent",
+            retries=settings.llm.retries,
         )
 
     def extract(
@@ -60,13 +67,6 @@ class PydanticAIInputParser:
             return output
 
         return ExtractedUserInput.model_validate(output)
-
-    @staticmethod
-    def _model_name() -> str:
-        if settings.llm.model.startswith("openrouter:"):
-            return settings.llm.model
-
-        return f"openrouter:{settings.llm.model}"
 
     @staticmethod
     def _empty_context() -> ParserContext:

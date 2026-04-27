@@ -90,9 +90,10 @@ class LLMConfig(BaseProjectSettings):
     api_key: SecretStr | None = Field(default=None)
     base_url: str = Field(default="https://openrouter.ai/api/v1")
     model: str = Field(default="openrouter/free")
-    timeout_seconds: int = Field(default=12)
+    timeout_seconds: int = Field(default=30)
     temperature: float = Field(default=0.0)
-    max_tokens: int = Field(default=500)
+    max_tokens: int = Field(default=2000)
+    retries: int = Field(default=3, ge=0, le=5)
 
     model_config = SettingsConfigDict(env_prefix="OPENROUTER_")
 
