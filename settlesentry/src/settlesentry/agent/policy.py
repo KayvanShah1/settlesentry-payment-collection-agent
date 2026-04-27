@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum, auto
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from settlesentry.agent.state import ConversationState
 from settlesentry.core import settings
@@ -85,7 +85,7 @@ class PolicySet:
 
             if not decision.allowed:
                 if decision.failed_rule is None:
-                    decision.failed_rule = rule.name
+                    return decision.model_copy(update={"failed_rule": rule.name})
                 return decision
 
         return PolicyDecision.allow()
@@ -95,11 +95,9 @@ def _deny(
     *,
     reason: PolicyReason,
     message: str,
-    failed_rule: str | None = None,
 ) -> PolicyDecision:
     return PolicyDecision.deny(
         reason=reason,
-        failed_rule=failed_rule,
         message=message,
     )
 
@@ -276,7 +274,7 @@ def require_complete_card_fields(state: ConversationState) -> PolicyDecision:
 def require_valid_payment_request(state: ConversationState) -> PolicyDecision:
     try:
         state.build_payment_request()
-    except ValueError as exc:
+    except (ValueError, ValidationError) as exc:
         return _deny(
             reason=PolicyReason.INVALID_PAYMENT_REQUEST,
             message=str(exc),
