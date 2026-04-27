@@ -54,13 +54,11 @@ class PolicyDecision(BaseModel):
     def deny(
         cls,
         reason: PolicyReason,
-        failed_rule: str | None = None,
         message: str | None = None,
     ) -> PolicyDecision:
         return cls(
             allowed=False,
             reason=reason,
-            failed_rule=failed_rule,
             message=message,
         )
 
@@ -84,9 +82,7 @@ class PolicySet:
             decision = rule.check(state)
 
             if not decision.allowed:
-                if decision.failed_rule is None:
-                    return decision.model_copy(update={"failed_rule": rule.name})
-                return decision
+                return decision.model_copy(update={"failed_rule": rule.name})
 
         return PolicyDecision.allow()
 
@@ -314,7 +310,6 @@ def identity_matches_account(state: ConversationState) -> bool:
         return False
 
     name_matches = state.provided_full_name == state.account.full_name
-
     secondary_matches = state.has_matching_secondary_factor()
 
     return name_matches and secondary_matches
@@ -329,7 +324,7 @@ COMMON_VERIFIED_ACCOUNT_RULES = COMMON_ACCOUNT_CONTEXT_RULES + (
     PolicyRule("require_verified_identity", require_verified_identity),
 )
 
-COMMON_PAYMENT_BASE_RULES = COMMON_VERIFIED_ACCOUNT_RULES + (
+PAYMENT_ELIGIBILITY_RULES = COMMON_VERIFIED_ACCOUNT_RULES + (
     PolicyRule("require_positive_balance", require_positive_balance),
 )
 
@@ -370,19 +365,19 @@ REVEAL_BALANCE_POLICY = PolicySet(
 
 COLLECT_PAYMENT_POLICY = PolicySet(
     name="collect_payment",
-    rules=COMMON_PAYMENT_BASE_RULES,
+    rules=PAYMENT_ELIGIBILITY_RULES,
 )
 
 
 PREPARE_PAYMENT_POLICY = PolicySet(
     name="prepare_payment",
-    rules=COMMON_PAYMENT_BASE_RULES + COMMON_PAYMENT_REQUEST_RULES,
+    rules=PAYMENT_ELIGIBILITY_RULES + COMMON_PAYMENT_REQUEST_RULES,
 )
 
 
 PROCESS_PAYMENT_POLICY = PolicySet(
     name="process_payment",
-    rules=COMMON_PAYMENT_BASE_RULES
+    rules=PAYMENT_ELIGIBILITY_RULES
     + (PolicyRule("require_payment_attempts_available", require_payment_attempts_available),)
     + COMMON_PAYMENT_REQUEST_RULES
     + (PolicyRule("require_payment_confirmation", require_payment_confirmation),),
