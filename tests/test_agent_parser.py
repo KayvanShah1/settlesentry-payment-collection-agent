@@ -2,8 +2,9 @@ from decimal import Decimal
 
 import pytest
 from settlesentry.agent.actions import ProposedAction, UserIntent
+from settlesentry.agent.parsers.base import ParserContext
 from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.state import ExtractedUserInput
+from settlesentry.agent.state import ConversationState, ConversationStep, ExtractedUserInput
 
 
 @pytest.fixture
@@ -481,3 +482,51 @@ def test_extremely_large_amount_is_extracted_precisely(parser: DeterministicInpu
     assert result.payment_amount == Decimal("10970787975385595793.09")
     assert result.intent == UserIntent.MAKE_PAYMENT
     assert result.proposed_action == ProposedAction.PREPARE_PAYMENT
+
+
+def test_context_does_not_make_unexpected_bare_value_infer_sensitive_field(parser: DeterministicInputParser):
+    context = ParserContext.from_state(
+        ConversationState(step=ConversationStep.WAITING_FOR_PAYMENT_AMOUNT),
+        expected_fields=("payment_amount",),
+    )
+
+    result = parser.extract("4321", context=context)
+
+    assert result.payment_amount == Decimal("4321")
+    assert result.aadhaar_last4 is None
+    assert result.cvv is None
+
+
+def test_parser_state_summary_does_not_include_sensitive_identity_or_card_values():
+    state = ConversationState(
+        step=ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION,
+        account_id="ACC1001",
+        verified=True,
+        payment_amount=Decimal("500"),
+        card_number="4532015112830366",
+        cvv="123",
+        provided_dob="1990-05-14",
+        provided_aadhaar_last4="4321",
+        provided_pincode="400001",
+    )
+
+    context = ParserContext.from_state(
+        state,
+        expected_fields=("confirmation",),
+        last_assistant_message="Please confirm payment.",
+    )
+
+    summary = context.state_summary.model_dump()
+
+    assert summary["account_id"] == "ACC1001"
+    assert summary["verified"] is True
+    assert summary["payment_amount"] == "500"
+    assert summary["card_last4"] == "0366"
+
+    serialized_summary = str(summary)
+
+    assert "4532015112830366" not in serialized_summary
+    assert "123" not in serialized_summary
+    assert "1990-05-14" not in serialized_summary
+    assert "4321" not in serialized_summary
+    assert "400001" not in serialized_summary
