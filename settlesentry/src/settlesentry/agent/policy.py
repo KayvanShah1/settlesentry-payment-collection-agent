@@ -35,6 +35,7 @@ class PolicyReason(StrEnum):
     INVALID_PAYMENT_REQUEST = auto()
     PAYMENT_NOT_CONFIRMED = auto()
     PAYMENT_ATTEMPTS_EXHAUSTED = auto()
+    PARTIAL_PAYMENT_NOT_ALLOWED = auto()
 
 
 class PolicyDecision(BaseModel):
