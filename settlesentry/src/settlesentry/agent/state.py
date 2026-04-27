@@ -13,9 +13,12 @@ from settlesentry.integrations.payments.schemas import (
     PaymentMethod,
     PaymentRequest,
     parse_decimal,
+    validate_money,
+)
+from settlesentry.security.identity import (
+    normalize_optional_identity_text,
     validate_fixed_digits,
     validate_iso_date,
-    validate_money,
 )
 from settlesentry.security.redaction import digits_only
 
@@ -118,10 +121,7 @@ class ExtractedUserInput(BaseModel):
     @field_validator("dob", "aadhaar_last4", "pincode", mode="before")
     @classmethod
     def parse_identity_fields(cls, value: Any) -> str | None:
-        if value in (None, ""):
-            return None
-
-        return str(value)
+        return normalize_optional_identity_text(value)
 
     @field_validator("dob")
     @classmethod

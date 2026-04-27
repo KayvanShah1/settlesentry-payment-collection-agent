@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 
+from settlesentry.security.identity import validate_fixed_digits, validate_iso_date
 from settlesentry.security.redaction import digits_only, luhn_valid
 
 ACCOUNT_ID_RE = re.compile(r"^ACC\d+$")
@@ -39,16 +40,6 @@ class PaymentsAPIErrorCode(StrEnum):
     TIMEOUT = auto()
     INVALID_RESPONSE = auto()
     UNEXPECTED_STATUS = auto()
-
-
-def validate_iso_date(value: str) -> str:
-    """Validate strict ISO date text (YYYY-MM-DD)."""
-    try:
-        date.fromisoformat(value)
-    except ValueError as exc:
-        raise ValueError("Date must be valid and use YYYY-MM-DD format") from exc
-
-    return value
 
 
 def validate_money(value: Decimal) -> Decimal:
@@ -75,14 +66,6 @@ def validate_account_id_format(
     """Validate canonical account ID text in ACC<digits> format."""
     if not ACCOUNT_ID_RE.fullmatch(value):
         raise ValueError(error_message)
-
-    return value
-
-
-def validate_fixed_digits(value: str, *, digits: int, field_name: str) -> str:
-    """Validate a numeric string with an exact fixed length."""
-    if not re.fullmatch(rf"\d{{{digits}}}", value):
-        raise ValueError(f"{field_name} must be exactly {digits} digits")
 
     return value
 
