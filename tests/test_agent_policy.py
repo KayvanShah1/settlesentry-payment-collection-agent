@@ -102,3 +102,39 @@ def test_payment_attempt_limit_rule():
 
     assert decision.allowed is False
     assert decision.reason == PolicyReason.PAYMENT_ATTEMPTS_EXHAUSTED
+
+
+def test_prepare_policy_denies_partial_payment_when_disabled(monkeypatch: pytest.MonkeyPatch):
+    state = make_verified_state()
+    state.payment_amount = Decimal("100.00")
+
+    monkeypatch.setattr(settings.agent_policy, "allow_partial_payments", False)
+    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
+
+    assert decision.allowed is False
+    assert decision.reason == PolicyReason.PARTIAL_PAYMENT_NOT_ALLOWED
+    assert decision.failed_rule == "require_partial_payment_policy"
+
+
+def test_prepare_policy_allows_full_balance_payment_when_partial_disabled(monkeypatch: pytest.MonkeyPatch):
+    state = make_verified_state()
+    state.payment_amount = state.account.balance if state.account else Decimal("0")
+
+    monkeypatch.setattr(settings.agent_policy, "allow_partial_payments", False)
+    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
+
+    # Full-balance amount passes partial-payment rule and proceeds to next guard.
+    assert decision.allowed is False
+    assert decision.reason == PolicyReason.MISSING_CARD_FIELDS
+    assert decision.failed_rule == "require_complete_card_fields"
+
+
+def test_prepare_policy_rejects_extremely_large_amount_before_request_build():
+    state = make_verified_state()
+    state.payment_amount = Decimal("10970787975385595793.09")
+
+    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
+
+    assert decision.allowed is False
+    assert decision.reason == PolicyReason.AMOUNT_EXCEEDS_BALANCE
+    assert decision.failed_rule == "require_amount_within_balance"
