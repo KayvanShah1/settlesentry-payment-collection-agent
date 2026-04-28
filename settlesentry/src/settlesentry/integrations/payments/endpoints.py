@@ -64,4 +64,4 @@ if __name__ == "__main__":
     for endpoint_name in EndpointName:
         url = endpoint_registry.url_for(endpoint_name)
         method = endpoint_registry.method_for(endpoint_name)
-        logger.debug(f"Endpoint: {endpoint_name} | Method: {method}\nURL: {url}")
+        logger.debug(f"endpoint={endpoint_name} | method={method} url={url}")
