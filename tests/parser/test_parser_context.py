@@ -52,7 +52,8 @@ def test_parser_instructions_include_policy_boundaries():
 
     assert "Do not verify identity." in instructions
     assert "Do not decide whether payment is allowed." in instructions
-    assert "proposed_action=process_payment" in instructions
+    assert "proposed_action should be confirm_payment" in instructions
+    assert "Never set proposed_action=process_payment" in instructions
 
 
 def test_parser_state_summary_does_not_include_sensitive_identity_or_card_values():

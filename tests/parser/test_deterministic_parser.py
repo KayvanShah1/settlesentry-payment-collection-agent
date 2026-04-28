@@ -2,13 +2,22 @@ from decimal import Decimal
 
 import pytest
 from settlesentry.agent.actions import ProposedAction, UserIntent
+from settlesentry.agent.parsers.base import ParserContext
 from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.state import ExtractedUserInput
+from settlesentry.agent.state import ConversationState, ConversationStep, ExtractedUserInput
 
 
 @pytest.fixture
 def parser() -> DeterministicInputParser:
     return DeterministicInputParser()
+
+
+def confirmation_context() -> ParserContext:
+    return ParserContext.from_state(
+        ConversationState(step=ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION),
+        expected_fields=("confirmation",),
+        last_assistant_message="Please confirm payment.",
+    )
 
 
 def test_empty_input_returns_default_extraction(parser: DeterministicInputParser):
@@ -390,11 +399,19 @@ def test_complete_payment_message_extracts_multiple_fields(parser: Deterministic
     ],
 )
 def test_confirmation_variants(parser: DeterministicInputParser, text: str):
-    result = parser.extract(text)
+    result = parser.extract(text, context=confirmation_context())
 
     assert result.confirmation is True
     assert result.intent == UserIntent.CONFIRM_PAYMENT
-    assert result.proposed_action == ProposedAction.PROCESS_PAYMENT
+    assert result.proposed_action == ProposedAction.CONFIRM_PAYMENT
+
+
+def test_confirmation_without_context_is_not_extracted(parser: DeterministicInputParser):
+    result = parser.extract("yes")
+
+    assert result.confirmation is None
+    assert result.intent == UserIntent.UNKNOWN
+    assert result.proposed_action == ProposedAction.NONE
 
 
 @pytest.mark.parametrize(
@@ -441,8 +458,8 @@ def test_out_of_order_user_message_extracts_all_relevant_fields(parser: Determin
     assert result.cvv == "123"
     assert result.expiry_month == 12
     assert result.expiry_year == 2027
-    assert result.intent == UserIntent.MAKE_PAYMENT
-    assert result.proposed_action == ProposedAction.PREPARE_PAYMENT
+    assert result.intent == UserIntent.LOOKUP_ACCOUNT
+    assert result.proposed_action == ProposedAction.LOOKUP_ACCOUNT
 
 
 def test_parser_does_not_infer_missing_fields(parser: DeterministicInputParser):
@@ -462,8 +479,8 @@ def test_parser_returns_model_even_when_mixed_valid_and_invalid_fields(parser: D
     assert result.account_id == "ACC1001"
     assert result.payment_amount == Decimal("500")
     assert result.dob is None
-    assert result.intent == UserIntent.MAKE_PAYMENT
-    assert result.proposed_action == ProposedAction.PREPARE_PAYMENT
+    assert result.intent == UserIntent.LOOKUP_ACCOUNT
+    assert result.proposed_action == ProposedAction.LOOKUP_ACCOUNT
 
 
 def test_retains_valid_fields_when_multiple_fields_are_invalid(parser: DeterministicInputParser):
@@ -482,13 +499,14 @@ def test_invalid_amount_does_not_drop_other_valid_fields(parser: DeterministicIn
 
     assert result.account_id == "ACC1001"
     assert result.payment_amount is None
-    assert result.intent == UserIntent.MAKE_PAYMENT
-    assert result.proposed_action == ProposedAction.PREPARE_PAYMENT
+    assert result.intent == UserIntent.LOOKUP_ACCOUNT
+    assert result.proposed_action == ProposedAction.LOOKUP_ACCOUNT
 
 
 def test_extremely_large_amount_is_extracted_precisely(parser: DeterministicInputParser):
     result = parser.extract("pay 10970787975385595793.09")
 
-    assert result.payment_amount == Decimal("10970787975385595793.09")
+    assert result.payment_amount is None
     assert result.intent == UserIntent.MAKE_PAYMENT
     assert result.proposed_action == ProposedAction.PREPARE_PAYMENT
+

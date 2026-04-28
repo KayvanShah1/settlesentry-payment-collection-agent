@@ -134,10 +134,10 @@ def test_bare_confirmation_is_extracted_when_expected():
 
     assert result.confirmation is True
     assert result.intent == UserIntent.CONFIRM_PAYMENT
-    assert result.proposed_action == ProposedAction.PROCESS_PAYMENT
+    assert result.proposed_action == ProposedAction.CONFIRM_PAYMENT
 
 
-def test_ordered_form_values_in_expected_order():
+def test_ordered_form_values_are_not_mapped_without_explicit_labels():
     parser = DeterministicInputParser()
     context = context_for(
         step=ConversationStep.WAITING_FOR_SECONDARY_FACTOR,
@@ -146,12 +146,13 @@ def test_ordered_form_values_in_expected_order():
 
     result = parser.extract("1990-05-14, Nithin Jain, 4532015112830366", context=context)
 
-    assert result.dob == "1990-05-14"
-    assert result.full_name == "Nithin Jain"
-    assert result.card_number == "4532015112830366"
+    assert result.dob is None
+    assert result.full_name is None
+    assert result.card_number is None
+    assert result.intent == UserIntent.UNKNOWN
 
 
-def test_identity_form_style_reply_is_mapped_by_expected_order():
+def test_form_style_identity_reply_is_not_auto_mapped_by_order():
     parser = DeterministicInputParser()
     context = context_for(
         step=ConversationStep.WAITING_FOR_SECONDARY_FACTOR,
@@ -160,117 +161,13 @@ def test_identity_form_style_reply_is_mapped_by_expected_order():
 
     result = parser.extract("Nithin Jain, 1990-05-14, 400001", context=context)
 
-    assert result.full_name == "Nithin Jain"
-    assert result.dob == "1990-05-14"
-    assert result.pincode == "400001"
-    assert result.intent == UserIntent.VERIFY_IDENTITY
+    assert result.full_name is None
+    assert result.dob is None
+    assert result.pincode is None
+    assert result.intent == UserIntent.UNKNOWN
 
 
-def test_identity_form_style_reply_with_secondary_factors():
-    parser = DeterministicInputParser()
-    context = context_for(
-        step=ConversationStep.WAITING_FOR_SECONDARY_FACTOR,
-        expected_fields=("dob", "aadhaar_last4", "pincode"),
-    )
-
-    result = parser.extract("1990-05-14, 4321, 400001", context=context)
-
-    assert result.dob == "1990-05-14"
-    assert result.aadhaar_last4 == "4321"
-    assert result.pincode == "400001"
-    assert result.intent == UserIntent.VERIFY_IDENTITY
-
-
-def test_card_form_style_reply_is_mapped_by_expected_order():
-    parser = DeterministicInputParser()
-    context = context_for(
-        step=ConversationStep.WAITING_FOR_CARDHOLDER_NAME,
-        expected_fields=("cardholder_name", "card_number", "cvv", "expiry"),
-    )
-
-    result = parser.extract(
-        "Nithin Jain, 4532 0151 1283 0366, 123, 12/2027",
-        context=context,
-    )
-
-    assert result.cardholder_name == "Nithin Jain"
-    assert result.card_number == "4532015112830366"
-    assert result.cvv == "123"
-    assert result.expiry_month == 12
-    assert result.expiry_year == 2027
-    assert result.intent == UserIntent.MAKE_PAYMENT
-
-
-def test_form_style_amount_with_comma_is_not_split_inside_number():
-    parser = DeterministicInputParser()
-    context = context_for(
-        step=ConversationStep.WAITING_FOR_PAYMENT_AMOUNT,
-        expected_fields=("cardholder_name", "payment_amount", "cvv"),
-    )
-
-    result = parser.extract("Nithin Jain, 1,250.75, 123", context=context)
-
-    assert result.cardholder_name == "Nithin Jain"
-    assert result.payment_amount == Decimal("1250.75")
-    assert result.cvv == "123"
-    assert result.intent == UserIntent.MAKE_PAYMENT
-
-
-def test_ordered_form_amount_with_thousands_separator_and_card_number():
-    parser = DeterministicInputParser()
-    context = context_for(
-        step=ConversationStep.WAITING_FOR_PAYMENT_AMOUNT,
-        expected_fields=("payment_amount", "card_number"),
-    )
-
-    result = parser.extract("1,250.75, 4532 0151 1283 0366", context=context)
-
-    assert result.payment_amount == Decimal("1250.75")
-    assert result.card_number == "4532015112830366"
-
-
-def test_ordered_form_amount_with_indian_separator_and_card_number():
-    parser = DeterministicInputParser()
-    context = context_for(
-        step=ConversationStep.WAITING_FOR_PAYMENT_AMOUNT,
-        expected_fields=("payment_amount", "card_number"),
-    )
-
-    result = parser.extract("1,23,250.75, 4532 0151 1283 0366", context=context)
-
-    assert result.payment_amount == Decimal("123250.75")
-    assert result.card_number == "4532015112830366"
-
-
-def test_ordered_form_with_fewer_values_than_expected():
-    parser = DeterministicInputParser()
-    context = context_for(
-        step=ConversationStep.WAITING_FOR_SECONDARY_FACTOR,
-        expected_fields=("dob", "full_name", "card_number"),
-    )
-
-    result = parser.extract("1990-05-14, Nithin Jain", context=context)
-
-    assert result.dob == "1990-05-14"
-    assert result.full_name == "Nithin Jain"
-    assert result.card_number is None
-
-
-def test_ordered_form_with_more_values_than_expected():
-    parser = DeterministicInputParser()
-    context = context_for(
-        step=ConversationStep.WAITING_FOR_SECONDARY_FACTOR,
-        expected_fields=("dob", "full_name"),
-    )
-
-    result = parser.extract("1990-05-14, Nithin Jain, ignored extra value", context=context)
-
-    assert result.dob == "1990-05-14"
-    assert result.full_name == "Nithin Jain"
-    assert result.card_number is None
-
-
-def test_ordered_form_handles_mixed_delimiters():
+def test_form_style_payment_reply_is_not_auto_split_by_delimiters():
     parser = DeterministicInputParser()
     context = context_for(
         step=ConversationStep.WAITING_FOR_PAYMENT_AMOUNT,
@@ -279,11 +176,11 @@ def test_ordered_form_handles_mixed_delimiters():
 
     result = parser.extract("1,250.75; 4532 0151 1283 0366\n123;12/2027", context=context)
 
-    assert result.payment_amount == Decimal("1250.75")
-    assert result.card_number == "4532015112830366"
-    assert result.cvv == "123"
-    assert result.expiry_month == 12
-    assert result.expiry_year == 2027
+    assert result.payment_amount is None
+    assert result.card_number is None
+    assert result.cvv is None
+    assert result.expiry_month is None
+    assert result.expiry_year is None
 
 
 def test_context_does_not_make_unexpected_bare_value_infer_sensitive_field():
@@ -298,3 +195,20 @@ def test_context_does_not_make_unexpected_bare_value_infer_sensitive_field():
     assert result.payment_amount == Decimal("4321")
     assert result.aadhaar_last4 is None
     assert result.cvv is None
+
+
+def test_expected_field_context_still_keeps_out_of_order_volunteered_fields():
+    parser = DeterministicInputParser()
+    context = context_for(
+        step=ConversationStep.WAITING_FOR_PAYMENT_AMOUNT,
+        expected_fields=("payment_amount",),
+        last_assistant_message="Please share the payment amount.",
+    )
+
+    result = parser.extract("My account is ACC1001 and I want to pay 500", context=context)
+
+    assert result.account_id == "ACC1001"
+    assert result.payment_amount == Decimal("500")
+    assert result.intent == UserIntent.LOOKUP_ACCOUNT
+    assert result.proposed_action == ProposedAction.LOOKUP_ACCOUNT
+
