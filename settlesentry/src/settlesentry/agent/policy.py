@@ -89,12 +89,6 @@ class PolicySet:
                 "allowed": decision.allowed,
                 "reason": decision.reason.value,
                 "failed_rule": decision.failed_rule,
-                "state_step": state.step.value,
-                "account_id": state.account_id,
-                "verified": state.verified,
-                "payment_confirmed": state.payment_confirmed,
-                "verification_attempts": state.verification_attempts,
-                "payment_attempts": state.payment_attempts,
             },
         )
 
