@@ -14,12 +14,12 @@ from settlesentry.integrations.payments.schemas import (
     PaymentRequest,
     parse_decimal,
 )
+from settlesentry.security.cards import digits_only
 from settlesentry.security.identity import (
     normalize_optional_identity_text,
     validate_fixed_digits,
     validate_iso_date,
 )
-from settlesentry.security.cards import digits_only
 
 EXTRACTED_TO_STATE_FIELD_MAP = {
     "account_id": "account_id",
@@ -84,11 +84,55 @@ class ConversationStep(StrEnum):
     CLOSED = auto()
 
 
+class SafeConversationState(BaseModel):
+    """
+    Privacy-safe state view exposed to tools, LLM responses, and logs.
+
+    Never include DOB, Aadhaar, pincode, full card number, CVV, raw account
+    details, last_error, or event_log here.
+    """
+
+    session_id: str | None = None
+    step: ConversationStep
+    account_id: str | None = None
+    account_loaded: bool = False
+    verified: bool = False
+    payment_amount: str | None = None
+    card_last4: str | None = None
+    payment_confirmed: bool = False
+    verification_attempts: int = 0
+    payment_attempts: int = 0
+    completed: bool = False
+    transaction_id: str | None = None
+
+    @classmethod
+    def from_state(
+        cls,
+        state: ConversationState,
+        *,
+        session_id: str | None = None,
+    ) -> SafeConversationState:
+        return cls(
+            session_id=session_id,
+            step=state.step,
+            account_id=state.account_id,
+            account_loaded=state.has_account_loaded(),
+            verified=state.verified,
+            payment_amount=str(state.payment_amount) if state.payment_amount is not None else None,
+            card_last4=state.card_last4(),
+            payment_confirmed=state.payment_confirmed,
+            verification_attempts=state.verification_attempts,
+            payment_attempts=state.payment_attempts,
+            completed=state.completed,
+            transaction_id=state.transaction_id,
+        )
+
+
 class ExtractedUserInput(BaseModel):
     """
     Structured user input extracted from regex, LLM, or both.
 
-    This schema is softer than the payment API schemas because users can
+    This schema is softer than the final payment API schemas because users can
     provide partial information across multiple turns.
     """
 
@@ -175,12 +219,10 @@ class ExtractedUserInput(BaseModel):
 
         return text
 
+
 class ConversationState(BaseModel):
     """
-    In-memory state for a single Agent instance.
-
-    The evaluator calls Agent.next() repeatedly on the same object, so this
-    model acts as the conversation memory.
+    Internal mutable state for one Agent instance/session.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -216,9 +258,9 @@ class ConversationState(BaseModel):
 
     def merge(self, extracted: ExtractedUserInput) -> None:
         """
-        Merge newly extracted user fields without clearing existing context.
+        Merge newly extracted fields without clearing known context.
 
-        Any change to payment details invalidates an earlier payment confirmation.
+        Any payment-field change invalidates an earlier confirmation.
         """
 
         for source_field, target_field in EXTRACTED_TO_STATE_FIELD_MAP.items():
@@ -242,14 +284,9 @@ class ConversationState(BaseModel):
         return any(self.secondary_factor_values())
 
     def secondary_factor_values(self) -> tuple[str | None, ...]:
-        """Return all user-provided secondary verification fields in fixed order."""
-        return tuple(
-            getattr(self, state_field)
-            for state_field, _ in SECONDARY_FACTOR_FIELD_MAP
-        )
+        return tuple(getattr(self, state_field) for state_field, _ in SECONDARY_FACTOR_FIELD_MAP)
 
     def has_matching_secondary_factor(self) -> bool:
-        """Return True if any provided secondary factor matches loaded account data."""
         if not self.account:
             return False
 
@@ -265,10 +302,7 @@ class ConversationState(BaseModel):
         return all(getattr(self, field_name) for field_name in REQUIRED_CARD_FIELD_NAMES)
 
     def outstanding_balance(self) -> Decimal | None:
-        if not self.account:
-            return None
-
-        return self.account.balance
+        return self.account.balance if self.account else None
 
     def card_last4(self) -> str | None:
         if not self.card_number:
@@ -276,6 +310,9 @@ class ConversationState(BaseModel):
 
         digits = digits_only(self.card_number)
         return digits[-4:] if len(digits) >= 4 else None
+
+    def safe_view(self, *, session_id: str | None = None) -> SafeConversationState:
+        return SafeConversationState.from_state(self, session_id=session_id)
 
     def build_card_details(self) -> CardDetails:
         return CardDetails(
@@ -296,9 +333,7 @@ class ConversationState(BaseModel):
         return PaymentRequest(
             account_id=self.account_id,
             amount=self.payment_amount,
-            payment_method=PaymentMethod(
-                card=self.build_card_details(),
-            ),
+            payment_method=PaymentMethod(card=self.build_card_details()),
         )
 
     def mark_closed(self) -> None:
