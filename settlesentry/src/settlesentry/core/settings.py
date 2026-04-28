@@ -69,7 +69,7 @@ class APIConfig(BaseProjectSettings):
     """External API configuration for the Prodigal payment verification API."""
 
     base_url: str = Field(
-        default="https://se-payment-verification-api.service.external.usea2.aws.prodigaltech.com/openapi",
+        default="https://se-payment-verification-api.service.external.usea2.aws.prodigaltech.com",
         description="Base URL for the Prodigal payment verification API",
     )
     timeout_seconds: int = Field(default=30, ge=1, le=120, description="Timeout for API requests in seconds")
