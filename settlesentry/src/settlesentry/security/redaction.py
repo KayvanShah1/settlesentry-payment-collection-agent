@@ -2,8 +2,12 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+MASK = "*******"
+
 SENSITIVE_KEYS = {
     "card_number",
+    "cardnumber",
+    "card",
     "cvv",
     "cvc",
     "aadhaar",
@@ -15,13 +19,21 @@ SENSITIVE_KEYS = {
 }
 
 
+def _normalize_key(key: str) -> str:
+    return key.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def is_sensitive_key(key: str) -> bool:
+    return _normalize_key(key) in SENSITIVE_KEYS
+
+
 CARD_CONTEXT_RE = re.compile(
     r"(?ix)"
     r"(?P<label>\"?(?:card(?:_number|\s+number)?|credit\s+card|debit\s+card)\"?)"
     r"(?P<sep>\s*(?::|=|\bis\b)?\s*)"
     r"(?P<quote>[\"']?)"
     r"(?P<value>\d[\d\s-]{11,22}\d)"
-    r"(?P=quote)?"
+    r"(?(quote)(?P=quote))"
 )
 
 CVV_RE = re.compile(
@@ -29,9 +41,8 @@ CVV_RE = re.compile(
     r"(?P<label>\"?(?:cvv|cvc)\"?)"
     r"(?P<sep>\s*(?::|=|\bis\b)?\s*)"
     r"(?P<quote>[\"']?)"
-    r"\d{3,4}"
-    r"(?P=quote)?"
-    r"\b"
+    r"(?P<value>\d{3,4})"
+    r"(?(quote)(?P=quote)|\b)"
 )
 
 AADHAAR_LAST4_RE = re.compile(
@@ -39,9 +50,8 @@ AADHAAR_LAST4_RE = re.compile(
     r"(?P<label>\"?(?:aadhaar(?:_last4|\s+last\s+4)?)\"?)"
     r"(?P<sep>\s*(?::|=|\bis\b)?\s*)"
     r"(?P<quote>[\"']?)"
-    r"\d{4}"
-    r"(?P=quote)?"
-    r"\b"
+    r"(?P<value>\d{4})"
+    r"(?(quote)(?P=quote)|\b)"
 )
 
 DOB_RE = re.compile(
@@ -49,8 +59,8 @@ DOB_RE = re.compile(
     r"(?P<label>\"?(?:dob|date\s+of\s+birth)\"?)"
     r"(?P<sep>\s*(?::|=|\bis\b)?\s*)"
     r"(?P<quote>[\"']?)"
-    r"\d{4}-\d{2}-\d{2}"
-    r"(?P=quote)?"
+    r"(?P<value>\d{4}-\d{2}-\d{2})"
+    r"(?(quote)(?P=quote))"
 )
 
 PINCODE_RE = re.compile(
@@ -58,47 +68,29 @@ PINCODE_RE = re.compile(
     r"(?P<label>\"?(?:pincode|pin\s+code)\"?)"
     r"(?P<sep>\s*(?::|=|\bis\b)?\s*)"
     r"(?P<quote>[\"']?)"
-    r"\d{6}"
-    r"(?P=quote)?"
-    r"\b"
+    r"(?P<value>\d{6})"
+    r"(?(quote)(?P=quote)|\b)"
 )
 
 LABEL_REPLACEMENT_PATTERNS = (
-    (CVV_RE, "[REDACTED_CVV]"),
-    (AADHAAR_LAST4_RE, "[REDACTED_AADHAAR_LAST4]"),
-    (DOB_RE, "[REDACTED_DOB]"),
-    (PINCODE_RE, "[REDACTED_PINCODE]"),
+    CARD_CONTEXT_RE,
+    CVV_RE,
+    AADHAAR_LAST4_RE,
+    DOB_RE,
+    PINCODE_RE,
 )
 
 
-def _mask_match(match: re.Match[str], mask: str) -> str:
+def _mask_match(match: re.Match[str]) -> str:
     label = match.group("label")
     sep = match.group("sep")
     quote = match.group("quote") or ""
-
-    return f"{label}{sep}{quote}{mask}{quote}"
-
-
-def _redact_card(match: re.Match[str]) -> str:
-    # In card-labeled contexts we always redact to avoid leaking PAN-like values.
-    return _mask_match(match, "[REDACTED_CARD]")
-
-
-def redact_sensitive_text(text: str) -> str:
-    redacted = CARD_CONTEXT_RE.sub(_redact_card, text)
-
-    for pattern, replacement in LABEL_REPLACEMENT_PATTERNS:
-        redacted = pattern.sub(
-            lambda match, token=replacement: _mask_match(match, token),
-            redacted,
-        )
-
-    return redacted
+    return f"{label}{sep}{quote}{MASK}{quote}"
 
 
 def redact_sensitive_value(value: Any, key_hint: str | None = None) -> Any:
-    if key_hint and key_hint.lower() in SENSITIVE_KEYS:
-        return "[REDACTED]"
+    if key_hint and is_sensitive_key(key_hint):
+        return MASK
 
     if isinstance(value, str):
         return redact_sensitive_text(value)
@@ -113,3 +105,10 @@ def redact_sensitive_value(value: Any, key_hint: str | None = None) -> Any:
         return tuple(redact_sensitive_value(item) for item in value)
 
     return value
+
+
+def redact_sensitive_text(text: str) -> str:
+    redacted = text
+    for pattern in LABEL_REPLACEMENT_PATTERNS:
+        redacted = pattern.sub(_mask_match, redacted)
+    return redacted

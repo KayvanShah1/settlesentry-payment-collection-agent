@@ -1,6 +1,7 @@
 import logging
 
 from settlesentry.core.logger import ContextAwareFormatter, SensitiveDataFilter
+from settlesentry.security.redaction import MASK
 
 
 def test_context_formatter_appends_extra_fields():
@@ -43,4 +44,4 @@ def test_context_formatter_shows_redacted_extra_values():
     rendered = ContextAwareFormatter("%(name)s - %(message)s").format(record)
 
     assert "operation_id=op_sensitive" in rendered
-    assert "card_number=[REDACTED]" in rendered
+    assert f"card_number={MASK}" in rendered
