@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from decimal import Decimal
 
 import pytest
@@ -40,6 +41,22 @@ def make_verified_state() -> ConversationState:
     )
 
 
+def assert_denied(
+    decision,
+    *,
+    reason: PolicyReason,
+    failed_rule: str,
+) -> None:
+    assert decision.allowed is False
+    assert decision.reason == reason
+    assert decision.failed_rule == failed_rule
+
+
+@pytest.fixture
+def verified_state() -> ConversationState:
+    return make_verified_state()
+
+
 def test_extracted_user_input_rejects_invalid_payment_amount():
     with pytest.raises(ValidationError):
         ExtractedUserInput(payment_amount="0")
@@ -69,80 +86,87 @@ def test_identity_match_requires_exact_name_and_secondary_factor():
     assert identity_matches_account(state) is False
 
 
-def test_prepare_and_process_policy_share_payment_request_guards():
-    state = make_verified_state()
-
-    prepare_decision = PREPARE_PAYMENT_POLICY.evaluate(state)
-    process_decision = PROCESS_PAYMENT_POLICY.evaluate(state)
-
-    assert prepare_decision.allowed is False
-    assert prepare_decision.reason == PolicyReason.MISSING_CARD_FIELDS
-    assert prepare_decision.failed_rule == "require_complete_card_fields"
-
-    assert process_decision.allowed is False
-    assert process_decision.reason == PolicyReason.MISSING_CARD_FIELDS
-    assert process_decision.failed_rule == "require_complete_card_fields"
-
-
-def test_verification_attempt_limit_rule():
-    state = ConversationState(
-        verification_attempts=settings.agent_policy.verification_max_attempts,
+@pytest.mark.parametrize(
+    "policy",
+    [PREPARE_PAYMENT_POLICY, PROCESS_PAYMENT_POLICY],
+    ids=["prepare_payment", "process_payment"],
+)
+def test_payment_policies_require_complete_card_fields(policy, verified_state: ConversationState):
+    decision = policy.evaluate(verified_state)
+    assert_denied(
+        decision,
+        reason=PolicyReason.MISSING_CARD_FIELDS,
+        failed_rule="require_complete_card_fields",
     )
 
-    decision = require_verification_attempts_available(state)
 
+@pytest.mark.parametrize(
+    ("state", "rule", "reason"),
+    [
+        (
+            ConversationState(verification_attempts=settings.agent_policy.verification_max_attempts),
+            require_verification_attempts_available,
+            PolicyReason.VERIFICATION_ATTEMPTS_EXHAUSTED,
+        ),
+        (
+            ConversationState(payment_attempts=settings.agent_policy.payment_max_attempts),
+            require_payment_attempts_available,
+            PolicyReason.PAYMENT_ATTEMPTS_EXHAUSTED,
+        ),
+    ],
+    ids=["verification_attempts_exhausted", "payment_attempts_exhausted"],
+)
+def test_attempt_limit_rules(
+    state: ConversationState,
+    rule: Callable[[ConversationState], object],
+    reason: PolicyReason,
+):
+    decision = rule(state)
     assert decision.allowed is False
-    assert decision.reason == PolicyReason.VERIFICATION_ATTEMPTS_EXHAUSTED
+    assert decision.reason == reason
 
 
-def test_payment_attempt_limit_rule():
-    state = ConversationState(
-        payment_attempts=settings.agent_policy.payment_max_attempts,
+def test_prepare_policy_denies_partial_payment_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    verified_state: ConversationState,
+):
+    monkeypatch.setattr(settings.agent_policy, "allow_partial_payments", False)
+    decision = PREPARE_PAYMENT_POLICY.evaluate(verified_state)
+    assert_denied(
+        decision,
+        reason=PolicyReason.PARTIAL_PAYMENT_NOT_ALLOWED,
+        failed_rule="require_partial_payment_policy",
     )
 
-    decision = require_payment_attempts_available(state)
 
-    assert decision.allowed is False
-    assert decision.reason == PolicyReason.PAYMENT_ATTEMPTS_EXHAUSTED
-
-
-def test_prepare_policy_denies_partial_payment_when_disabled(monkeypatch: pytest.MonkeyPatch):
-    state = make_verified_state()
-    state.payment_amount = Decimal("100.00")
-
+def test_prepare_policy_allows_full_balance_payment_when_partial_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    verified_state: ConversationState,
+):
+    verified_state.payment_amount = verified_state.account.balance if verified_state.account else Decimal("0")
     monkeypatch.setattr(settings.agent_policy, "allow_partial_payments", False)
-    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
-
-    assert decision.allowed is False
-    assert decision.reason == PolicyReason.PARTIAL_PAYMENT_NOT_ALLOWED
-    assert decision.failed_rule == "require_partial_payment_policy"
-
-
-def test_prepare_policy_allows_full_balance_payment_when_partial_disabled(monkeypatch: pytest.MonkeyPatch):
-    state = make_verified_state()
-    state.payment_amount = state.account.balance if state.account else Decimal("0")
-
-    monkeypatch.setattr(settings.agent_policy, "allow_partial_payments", False)
-    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
-
-    # Full-balance amount passes partial-payment rule and proceeds to next guard.
-    assert decision.allowed is False
-    assert decision.reason == PolicyReason.MISSING_CARD_FIELDS
-    assert decision.failed_rule == "require_complete_card_fields"
+    decision = PREPARE_PAYMENT_POLICY.evaluate(verified_state)
+    assert_denied(
+        decision,
+        reason=PolicyReason.MISSING_CARD_FIELDS,
+        failed_rule="require_complete_card_fields",
+    )
 
 
-def test_prepare_policy_rejects_extremely_large_amount_before_request_build():
-    state = make_verified_state()
-    state.payment_amount = Decimal("10970787975385595793.09")
+def test_prepare_policy_rejects_extremely_large_amount_before_request_build(verified_state: ConversationState):
+    verified_state.payment_amount = Decimal("10970787975385595793.09")
+    decision = PREPARE_PAYMENT_POLICY.evaluate(verified_state)
+    assert_denied(
+        decision,
+        reason=PolicyReason.AMOUNT_EXCEEDS_BALANCE,
+        failed_rule="require_amount_within_balance",
+    )
 
-    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
 
-    assert decision.allowed is False
-    assert decision.reason == PolicyReason.AMOUNT_EXCEEDS_BALANCE
-    assert decision.failed_rule == "require_amount_within_balance"
-
-
-def test_policy_set_logs_denied_decision_with_reason(monkeypatch: pytest.MonkeyPatch):
+def test_policy_set_logs_denied_decision_with_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    verified_state: ConversationState,
+):
     emitted: list[tuple[str, dict]] = []
 
     def fake_info(message, *args, **kwargs):
@@ -150,11 +174,12 @@ def test_policy_set_logs_denied_decision_with_reason(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(policy_module.logger, "info", fake_info)
 
-    state = make_verified_state()
-    decision = PREPARE_PAYMENT_POLICY.evaluate(state)
-
-    assert decision.allowed is False
-    assert decision.reason == PolicyReason.MISSING_CARD_FIELDS
+    decision = PREPARE_PAYMENT_POLICY.evaluate(verified_state)
+    assert_denied(
+        decision,
+        reason=PolicyReason.MISSING_CARD_FIELDS,
+        failed_rule="require_complete_card_fields",
+    )
 
     policy_logs = [extra for message, extra in emitted if message == "policy_decision"]
     assert len(policy_logs) == 1
@@ -172,10 +197,11 @@ def test_reveal_balance_denies_when_identity_not_verified():
     )
 
     decision = REVEAL_BALANCE_POLICY.evaluate(state)
-
-    assert decision.allowed is False
-    assert decision.reason == PolicyReason.IDENTITY_NOT_VERIFIED
-    assert decision.failed_rule == "require_verified_identity"
+    assert_denied(
+        decision,
+        reason=PolicyReason.IDENTITY_NOT_VERIFIED,
+        failed_rule="require_verified_identity",
+    )
 
 
 def test_process_payment_denies_when_not_confirmed_after_valid_request():
@@ -193,10 +219,11 @@ def test_process_payment_denies_when_not_confirmed_after_valid_request():
     )
 
     decision = PROCESS_PAYMENT_POLICY.evaluate(state)
-
-    assert decision.allowed is False
-    assert decision.reason == PolicyReason.PAYMENT_NOT_CONFIRMED
-    assert decision.failed_rule == "require_payment_confirmation"
+    assert_denied(
+        decision,
+        reason=PolicyReason.PAYMENT_NOT_CONFIRMED,
+        failed_rule="require_payment_confirmation",
+    )
 
 
 def test_prepare_payment_denies_when_balance_is_zero(monkeypatch: pytest.MonkeyPatch):
@@ -209,7 +236,8 @@ def test_prepare_payment_denies_when_balance_is_zero(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(settings.agent_policy, "allow_zero_balance_payment", False)
 
     decision = PREPARE_PAYMENT_POLICY.evaluate(state)
-
-    assert decision.allowed is False
-    assert decision.reason == PolicyReason.ZERO_BALANCE
-    assert decision.failed_rule == "require_positive_balance"
+    assert_denied(
+        decision,
+        reason=PolicyReason.ZERO_BALANCE,
+        failed_rule="require_positive_balance",
+    )
