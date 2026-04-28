@@ -1,7 +1,5 @@
-from pydantic import SecretStr
-
 import pytest
-
+from pydantic import SecretStr
 from settlesentry.agent.actions import ProposedAction, UserIntent
 from settlesentry.agent.parser import CombinedInputParser, build_input_parser
 from settlesentry.agent.parsers.base import ParserContext
@@ -175,3 +173,29 @@ def test_combined_parser_falls_back_when_llm_result_has_no_output_shape():
     result = parser.extract("anything")
 
     assert result.account_id == "ACC1004"
+
+
+def test_combined_parser_logs_fallback_when_primary_raises(monkeypatch: pytest.MonkeyPatch):
+    emitted: list[tuple[str, dict]] = []
+
+    def fake_warning(message, *args, **kwargs):
+        emitted.append((message, kwargs.get("extra", {})))
+
+    monkeypatch.setattr("settlesentry.agent.parser.logger.warning", fake_warning)
+
+    fallback = _FixedParser(
+        ExtractedUserInput(
+            intent=UserIntent.LOOKUP_ACCOUNT,
+            proposed_action=ProposedAction.LOOKUP_ACCOUNT,
+            account_id="ACC1002",
+        )
+    )
+    parser = CombinedInputParser(primary=_FailingParser(), fallback=fallback)
+
+    result = parser.extract("whatever")
+
+    assert result.account_id == "ACC1002"
+
+    fallback_logs = [extra for message, extra in emitted if message == "llm_parser_fallback"]
+    assert len(fallback_logs) == 1
+    assert fallback_logs[0]["error_type"] == "RuntimeError"

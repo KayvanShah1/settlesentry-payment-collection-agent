@@ -7,7 +7,9 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from settlesentry.agent.parsers.base import ParserContext
 from settlesentry.agent.parsers.prompts import build_parser_instructions, build_parser_user_prompt
 from settlesentry.agent.state import ConversationState, ExtractedUserInput
-from settlesentry.core import settings
+from settlesentry.core import OperationLogContext, get_logger, settings
+
+logger = get_logger("PydanticAIInputParser")
 
 
 class PydanticAIInputParser:
@@ -50,23 +52,62 @@ class PydanticAIInputParser:
         if context is None:
             context = self._empty_context()
 
-        result = self.agent.run_sync(
-            build_parser_user_prompt(
-                user_input=user_input,
-                context=context,
+        operation = OperationLogContext(operation="llm_parse")
+
+        try:
+            result = self.agent.run_sync(
+                build_parser_user_prompt(
+                    user_input=user_input,
+                    context=context,
+                )
             )
+
+            output = self._extract_result_output(result)
+
+            if isinstance(output, ExtractedUserInput):
+                parsed = output
+            else:
+                parsed = ExtractedUserInput.model_validate(output)
+
+        except Exception as exc:
+            logger.debug(
+                "llm_parser_failed",
+                extra=operation.completed_extra(
+                    current_step=context.current_step,
+                    expected_fields=self._format_expected_fields(context),
+                    error_type=type(exc).__name__,
+                ),
+            )
+            raise
+
+        logger.debug(
+            "llm_parser_completed",
+            extra=operation.completed_extra(
+                current_step=context.current_step,
+                expected_fields=self._format_expected_fields(context),
+                intent=parsed.intent.value,
+                proposed_action=parsed.proposed_action.value,
+            ),
         )
 
+        return parsed
+
+    @staticmethod
+    def _extract_result_output(result: object) -> object:
         output = getattr(result, "output", None)
 
         # Compatibility fallback for older PydanticAI result objects.
         if output is None:
             output = getattr(result, "data", None)
 
-        if isinstance(output, ExtractedUserInput):
-            return output
+        return output
 
-        return ExtractedUserInput.model_validate(output)
+    @staticmethod
+    def _format_expected_fields(context: ParserContext) -> str | None:
+        if not context.expected_fields:
+            return None
+
+        return ",".join(context.expected_fields)
 
     @staticmethod
     def _empty_context() -> ParserContext:
