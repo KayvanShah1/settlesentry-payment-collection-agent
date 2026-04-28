@@ -50,8 +50,10 @@ def test_parser_prompt_payload_contains_context_fields():
 def test_parser_instructions_include_policy_boundaries():
     instructions = build_parser_instructions()
 
+    assert "Your job is extraction only." in instructions
     assert "Do not verify identity." in instructions
     assert "Do not decide whether payment is allowed." in instructions
+    assert "Do not authorize or process payment." in instructions
     assert "proposed_action should be confirm_payment" in instructions
     assert "Never set proposed_action=process_payment" in instructions
 
