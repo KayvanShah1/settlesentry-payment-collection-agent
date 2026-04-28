@@ -101,12 +101,12 @@ def test_extracted_user_input_rejects_invalid_payment_amount():
         ExtractedUserInput(payment_amount="10.999")
 
 
-def test_extracted_user_input_normalizes_payment_amount_to_two_decimals():
+def test_extracted_user_input_parses_payment_amount_without_forced_quantization():
     extracted = ExtractedUserInput(payment_amount="500")
 
-    assert extracted.payment_amount == Decimal("500.00")
-    assert extracted.payment_amount.as_tuple().exponent == -2
-    assert extracted.model_dump(mode="json")["payment_amount"] == "500.00"
+    assert extracted.payment_amount == Decimal("500")
+    assert extracted.payment_amount.as_tuple().exponent == 0
+    assert extracted.model_dump(mode="json")["payment_amount"] == "500"
 
 
 def test_extracted_user_input_normalizes_card_number_formatting():

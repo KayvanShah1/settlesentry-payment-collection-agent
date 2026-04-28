@@ -13,7 +13,6 @@ from settlesentry.integrations.payments.schemas import (
     PaymentMethod,
     PaymentRequest,
     parse_decimal,
-    validate_money,
 )
 from settlesentry.security.identity import (
     normalize_optional_identity_text,
@@ -105,7 +104,12 @@ class ExtractedUserInput(BaseModel):
     aadhaar_last4: str | None = None
     pincode: str | None = None
 
-    payment_amount: Decimal | None = None
+    payment_amount: Decimal | None = Field(
+        default=None,
+        gt=0,
+        max_digits=12,
+        decimal_places=2,
+    )
 
     cardholder_name: str | None = None
     card_number: str | None = None
@@ -170,16 +174,6 @@ class ExtractedUserInput(BaseModel):
             return digits if digits else None
 
         return text
-
-    @field_validator("payment_amount")
-    @classmethod
-    def validate_payment_amount(cls, value: Decimal | None) -> Decimal | None:
-        if value is None:
-            return None
-
-        validated = validate_money(value)
-        return validated.quantize(Decimal("0.01"))
-
 
 class ConversationState(BaseModel):
     """
