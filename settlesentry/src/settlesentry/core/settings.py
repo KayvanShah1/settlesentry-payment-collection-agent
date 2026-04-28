@@ -86,7 +86,7 @@ class LLMConfig(BaseProjectSettings):
     without external LLM setup.
     """
 
-    enabled: bool = Field(default=False)
+    enabled: bool = Field(default=True)
     api_key: SecretStr | None = Field(default=None)
     base_url: str = Field(default="https://openrouter.ai/api/v1")
     model: str = Field(default="openrouter/free")
