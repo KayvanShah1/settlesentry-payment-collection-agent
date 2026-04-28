@@ -1,10 +1,10 @@
+import logging
 from collections.abc import Callable
 from decimal import Decimal
 
 import pytest
-from pydantic import ValidationError
-
 import settlesentry.agent.policy as policy_module
+from pydantic import ValidationError
 from settlesentry.agent.policy import (
     PREPARE_PAYMENT_POLICY,
     PROCESS_PAYMENT_POLICY,
@@ -241,3 +241,39 @@ def test_prepare_payment_denies_when_balance_is_zero(monkeypatch: pytest.MonkeyP
         reason=PolicyReason.ZERO_BALANCE,
         failed_rule="require_positive_balance",
     )
+
+
+def test_policy_set_logs_allowed_decision_at_debug(verified_state: ConversationState):
+    log_path = settings.log_dir / (settings.logging.file_name or f"{settings.project_name}.log")
+    start_size = log_path.stat().st_size if log_path.exists() else 0
+
+    logger = policy_module.logger
+    original_logger_level = logger.level
+    original_handler_levels = [handler.level for handler in logger.handlers]
+
+    logger.setLevel(logging.DEBUG)
+    for handler in logger.handlers:
+        handler.setLevel(logging.DEBUG)
+
+    try:
+        decision = REVEAL_BALANCE_POLICY.evaluate(verified_state)
+        for handler in logger.handlers:
+            handler.flush()
+    finally:
+        logger.setLevel(original_logger_level)
+        for handler, level in zip(logger.handlers, original_handler_levels):
+            handler.setLevel(level)
+
+    assert log_path.exists()
+    with log_path.open(encoding="utf-8") as log_file:
+        log_file.seek(start_size)
+        new_logs = log_file.read()
+
+    assert decision.allowed is True
+    assert decision.reason == PolicyReason.ALLOWED
+    assert decision.failed_rule is None
+
+    assert "policy_decision" in new_logs
+    assert "policy_name=reveal_balance" in new_logs
+    assert "allowed=True" in new_logs
+    assert "reason=allowed" in new_logs
