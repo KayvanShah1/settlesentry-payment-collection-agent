@@ -1,9 +1,3 @@
-"""
-Pydantic models and validators for payment API contracts.
-
-These schemas keep tool payloads strict, predictable, and easy to inspect.
-"""
-
 from __future__ import annotations
 
 import re
@@ -22,9 +16,15 @@ from pydantic import (
 )
 
 from settlesentry.security.cards import digits_only, luhn_valid
-from settlesentry.security.identity import validate_fixed_digits, validate_iso_date
+from settlesentry.security.identity import validate_iso_date
 
-ACCOUNT_ID_RE = re.compile(r"^ACC\d+$")
+
+class Patterns:
+    ACCOUNT_ID = r"^ACC\d+$"
+    AADHAAR_LAST4 = r"^\d{4}$"
+    PINCODE = r"^\d{6}$"
+    CVV = r"^\d{3,4}$"
+    CARD_ALLOWED_CHARS = r"[\d\s-]+"
 
 
 class PaymentsAPIErrorCode(StrEnum):
@@ -41,82 +41,73 @@ class PaymentsAPIErrorCode(StrEnum):
     INVALID_RESPONSE = auto()
     UNEXPECTED_STATUS = auto()
 
+    def default_message(self) -> str:
+        return PAYMENT_ERROR_MESSAGES.get(
+            self,
+            "The payment could not be processed.",
+        )
 
-def validate_money(value: Decimal) -> Decimal:
-    """Validate positive currency amount with at most two decimal places."""
-    if value <= Decimal("0"):
-        raise ValueError("Amount must be greater than zero")
 
-    if value.as_tuple().exponent < -2:
-        raise ValueError("Amount cannot have more than 2 decimal places")
-
-    return value
+PAYMENT_ERROR_MESSAGES: dict[PaymentsAPIErrorCode, str] = {
+    PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND: "No account found with the provided account ID.",
+    PaymentsAPIErrorCode.INVALID_AMOUNT: "The payment amount is invalid.",
+    PaymentsAPIErrorCode.INSUFFICIENT_BALANCE: "The payment amount exceeds the outstanding balance.",
+    PaymentsAPIErrorCode.INVALID_CARD: "The card number appears to be invalid.",
+    PaymentsAPIErrorCode.INVALID_CVV: "The CVV appears to be invalid.",
+    PaymentsAPIErrorCode.INVALID_EXPIRY: "The card expiry appears to be invalid or expired.",
+    PaymentsAPIErrorCode.NETWORK_ERROR: "The payment service is currently unreachable.",
+    PaymentsAPIErrorCode.TIMEOUT: "The payment service took too long to respond.",
+    PaymentsAPIErrorCode.INVALID_RESPONSE: "The payment service returned an invalid response.",
+    PaymentsAPIErrorCode.UNEXPECTED_STATUS: "The payment service returned an unexpected response.",
+}
 
 
 def parse_decimal(value: object) -> Decimal:
-    """Coerce numeric-like values into Decimal without float precision loss."""
     return Decimal(str(value))
 
 
-def validate_account_id_format(
-    value: str,
-    *,
-    error_message: str = "Account ID must look like ACC1001",
-) -> str:
-    """Validate canonical account ID text in ACC<digits> format."""
-    if not ACCOUNT_ID_RE.fullmatch(value):
-        raise ValueError(error_message)
+def validate_money(value: Decimal) -> Decimal:
+    if not value.is_finite():
+        raise ValueError("Amount must be finite.")
+
+    if value <= Decimal("0"):
+        raise ValueError("Amount must be greater than 0.")
+
+    if value.as_tuple().exponent < -2:
+        raise ValueError("Amount must have at most 2 decimal places.")
 
     return value
 
 
-class AccountLookupRequest(BaseModel):
+class PaymentAPIModel(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+
+class AccountLookupRequest(PaymentAPIModel):
     """Request payload for account lookup tool call."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    account_id: str = Field(..., description="Account ID to look up")
-
-    @field_validator("account_id")
-    @classmethod
-    def validate_account_id(cls, value: str) -> str:
-        return validate_account_id_format(value)
+    account_id: str = Field(
+        ...,
+        pattern=Patterns.ACCOUNT_ID,
+        description="Account ID in ACC<digits> format.",
+        examples=["ACC1001"],
+    )
 
 
-class AccountDetails(BaseModel):
+class AccountDetails(PaymentAPIModel):
     """Normalized account details returned by successful account lookup."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    account_id: str
-    full_name: str
-    dob: str
-    aadhaar_last4: str
-    pincode: str
-    balance: Decimal
-
-    @field_validator("account_id")
-    @classmethod
-    def validate_account_id(cls, value: str) -> str:
-        return validate_account_id_format(
-            value,
-            error_message="Invalid account_id in API response",
-        )
+    account_id: str = Field(..., pattern=Patterns.ACCOUNT_ID)
+    full_name: str = Field(..., min_length=1, max_length=100)
+    dob: str = Field(..., description="Date of birth in YYYY-MM-DD format.")
+    aadhaar_last4: str = Field(..., pattern=Patterns.AADHAAR_LAST4)
+    pincode: str = Field(..., pattern=Patterns.PINCODE)
+    balance: Decimal = Field(..., ge=0, max_digits=12, decimal_places=2)
 
     @field_validator("dob")
     @classmethod
     def validate_dob(cls, value: str) -> str:
         return validate_iso_date(value)
-
-    @field_validator("aadhaar_last4")
-    @classmethod
-    def validate_aadhaar_last4(cls, value: str) -> str:
-        return validate_fixed_digits(value, digits=4, field_name="aadhaar_last4")
-
-    @field_validator("pincode")
-    @classmethod
-    def validate_pincode(cls, value: str) -> str:
-        return validate_fixed_digits(value, digits=6, field_name="pincode")
 
     @field_validator("balance", mode="before")
     @classmethod
@@ -128,38 +119,26 @@ class AccountDetails(BaseModel):
         return float(value)
 
 
-class AccountLookupError(BaseModel):
-    """Typed shape for known account lookup failure payloads."""
-
-    error_code: Literal[PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND]
-    message: str
-
-
-class CardDetails(BaseModel):
+class CardDetails(PaymentAPIModel):
     """Card fields with structural and business-rule validation."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    cardholder_name: str
-    card_number: str
-    cvv: str
-    expiry_month: int
-    expiry_year: int
-
-    @field_validator("cardholder_name")
-    @classmethod
-    def validate_cardholder_name(cls, value: str) -> str:
-        if not value:
-            raise ValueError("cardholder_name is required")
-
-        return value
+    cardholder_name: str = Field(..., min_length=1, max_length=100)
+    card_number: str = Field(
+        ...,
+        min_length=13,
+        max_length=23,
+        description="Card number with digits, spaces, or hyphens.",
+    )
+    cvv: str = Field(..., pattern=Patterns.CVV)
+    expiry_month: int = Field(..., ge=1, le=12)
+    expiry_year: int = Field(..., ge=2000, le=2100)
 
     @field_validator("card_number")
     @classmethod
     def validate_card_number(cls, value: str) -> str:
         digits = digits_only(value)
 
-        if digits != value and not re.fullmatch(r"[\d\s-]+", value):
+        if digits != value and not re.fullmatch(Patterns.CARD_ALLOWED_CHARS, value):
             raise ValueError("Card number contains invalid characters")
 
         if not 13 <= len(digits) <= 19:
@@ -169,30 +148,6 @@ class CardDetails(BaseModel):
             raise ValueError("Card number failed Luhn validation")
 
         return digits
-
-    @field_validator("cvv")
-    @classmethod
-    def validate_cvv_digits(cls, value: str) -> str:
-        if not re.fullmatch(r"\d{3,4}", value):
-            raise ValueError("CVV must be 3 or 4 digits")
-
-        return value
-
-    @field_validator("expiry_month")
-    @classmethod
-    def validate_expiry_month(cls, value: int) -> int:
-        if not 1 <= value <= 12:
-            raise ValueError("expiry_month must be between 1 and 12")
-
-        return value
-
-    @field_validator("expiry_year")
-    @classmethod
-    def validate_expiry_year(cls, value: int) -> int:
-        if value < 2000:
-            raise ValueError("expiry_year must be a four-digit year")
-
-        return value
 
     @model_validator(mode="after")
     def validate_card_consistency(self) -> CardDetails:
@@ -211,59 +166,44 @@ class CardDetails(BaseModel):
         return self
 
 
-class PaymentMethod(BaseModel):
-    """Payment method envelope currently supporting card payments only."""
-
+class PaymentMethod(PaymentAPIModel):
     type: Literal["card"] = "card"
     card: CardDetails
 
 
-class PaymentRequest(BaseModel):
+class PaymentRequest(PaymentAPIModel):
     """Request payload for payment processing tool call."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    account_id: str
-    amount: Decimal
+    account_id: str = Field(..., pattern=Patterns.ACCOUNT_ID)
+    amount: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)
     payment_method: PaymentMethod
-
-    @field_validator("account_id")
-    @classmethod
-    def validate_account_id(cls, value: str) -> str:
-        return validate_account_id_format(value)
 
     @field_validator("amount", mode="before")
     @classmethod
     def parse_amount(cls, value: object) -> Decimal:
         return parse_decimal(value)
 
-    @field_validator("amount")
-    @classmethod
-    def validate_amount(cls, value: Decimal) -> Decimal:
-        return validate_money(value)
-
     @field_serializer("amount")
     def serialize_amount(self, value: Decimal) -> float:
         return float(value)
 
 
-class PaymentSuccessResponse(BaseModel):
-    """Expected successful payment API payload shape."""
-
+class PaymentSuccessResponse(PaymentAPIModel):
     success: Literal[True]
-    transaction_id: str
+    transaction_id: str = Field(..., min_length=1)
 
 
-class PaymentFailureResponse(BaseModel):
-    """Expected failed payment API payload shape."""
-
+class PaymentFailureResponse(PaymentAPIModel):
     success: Literal[False]
     error_code: PaymentsAPIErrorCode
 
 
-class LookupResult(BaseModel):
-    """Internal normalized outcome for lookup step."""
+class AccountLookupError(PaymentAPIModel):
+    error_code: Literal[PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND]
+    message: str
 
+
+class LookupResult(PaymentAPIModel):
     ok: bool
     account: AccountDetails | None = None
     error_code: PaymentsAPIErrorCode | None = None
@@ -271,9 +211,7 @@ class LookupResult(BaseModel):
     status_code: int | None = None
 
 
-class PaymentResult(BaseModel):
-    """Internal normalized outcome for payment step."""
-
+class PaymentResult(PaymentAPIModel):
     ok: bool
     transaction_id: str | None = None
     error_code: PaymentsAPIErrorCode | None = None
