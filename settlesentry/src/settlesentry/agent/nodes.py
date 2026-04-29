@@ -66,6 +66,25 @@ CORRECTABLE_FIELDS = (
     "expiry_year",
 )
 
+LOOKUP_SERVICE_ERROR_STATUSES = {
+    "invalid_response",
+    "unexpected_status",
+    "network_error",
+    "timeout",
+}
+
+TERMINAL_PAYMENT_SERVICE_ERRORS = {
+    PaymentsAPIErrorCode.NETWORK_ERROR,
+    PaymentsAPIErrorCode.TIMEOUT,
+    PaymentsAPIErrorCode.INVALID_RESPONSE,
+    PaymentsAPIErrorCode.UNEXPECTED_STATUS,
+}
+
+AMOUNT_RETRY_ERRORS = {
+    PaymentsAPIErrorCode.INVALID_AMOUNT,
+    PaymentsAPIErrorCode.INSUFFICIENT_BALANCE,
+}
+
 
 def safe_state_summary(deps: AgentDeps) -> SafeConversationState:
     return deps.state.safe_view(session_id=deps.session_id)
@@ -293,11 +312,16 @@ def lookup_account(deps: AgentDeps) -> AgentToolResult:
         deps.state.last_error = result.message
         deps.state.step = ConversationStep.WAITING_FOR_ACCOUNT_ID
 
+        status = result.error_code.value if result.error_code else "account_lookup_failed"
+
+        if status in LOOKUP_SERVICE_ERROR_STATUSES:
+            status = "account_lookup_failed"
+
         return _result(
             deps,
             operation,
             ok=False,
-            status=result.error_code.value if result.error_code else "account_lookup_failed",
+            status=status,
             required_fields=("account_id",),
             facts={"reason": result.message},
         )
@@ -443,6 +467,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
 
     deps.state.payment_attempts += 1
     deps.state.payment_confirmed = False
+    deps.state.last_error = result.message
 
     if result.ok:
         deps.state.transaction_id = result.transaction_id
@@ -461,7 +486,23 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
             },
         )
 
-    deps.state.last_error = result.message
+    if result.error_code in TERMINAL_PAYMENT_SERVICE_ERRORS:
+        deps.state.mark_closed()
+        _clear_payment_secrets(deps)
+
+        return _result(
+            deps,
+            operation,
+            ok=False,
+            status=result.error_code.value if result.error_code else "payment_failed",
+            facts={
+                "reason": result.message,
+                "attempts_remaining": settings.agent_policy.payment_max_attempts - deps.state.payment_attempts,
+            },
+        )
+
+    if result.error_code in AMOUNT_RETRY_ERRORS:
+        deps.state.payment_amount = None
 
     if result.error_code in {PaymentsAPIErrorCode.INVALID_CARD, None}:
         deps.state.card_number = None

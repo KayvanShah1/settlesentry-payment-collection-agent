@@ -16,7 +16,7 @@ class ResponseContext(BaseModel):
 
 
 FIELD_LABELS = {
-    "account_id": "account ID in ACC<digits> format, for example ACC1001",
+    "account_id": "account ID",
     "full_name": "full name exactly as registered on the account",
     "dob_or_aadhaar_last4_or_pincode": (
         "one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode"
@@ -31,12 +31,29 @@ FIELD_LABELS = {
 
 DETERMINISTIC_STATUSES = {
     "greeting",
+    "account_not_found",
+    "account_lookup_failed",
+    "identity_verification_failed",
     "verification_exhausted",
     "zero_balance",
+    "amount_exceeds_balance",
+    "amount_exceeds_policy_limit",
+    "invalid_payment_amount",
+    "partial_payment_not_allowed",
+    "insufficient_balance",
+    "invalid_payment_request",
+    "invalid_card",
+    "invalid_cvv",
+    "invalid_expiry",
+    "network_error",
+    "timeout",
+    "invalid_response",
+    "unexpected_status",
+    "payment_failed",
+    "payment_attempts_exhausted",
     "payment_success",
     "conversation_closed",
     "cancelled",
-    "payment_attempts_exhausted",
 }
 
 
@@ -81,6 +98,12 @@ def build_fallback_response(context: ResponseContext) -> str:
         pending = pending_question(context)
         return f"Updated. {pending}" if pending else "Updated."
 
+    if status == "account_not_found":
+        return "I could not find an account for that account ID. Please check it and share the correct account ID."
+
+    if status == "account_lookup_failed":
+        return "I could not look up that account right now. Please re-enter your account ID."
+
     if status == "amount_exceeds_balance":
         return "The payment amount cannot exceed the outstanding balance. Please share a lower payment amount in INR."
 
@@ -101,9 +124,6 @@ def build_fallback_response(context: ResponseContext) -> str:
 
     if status == "account_loaded":
         return "Account found. Please share your full name exactly as registered on the account."
-
-    if status in {"account_not_found", "account_lookup_failed"}:
-        return "I could not find an account for that account ID. Please share a valid account ID in ACC<digits> format."
 
     if status == "identity_verified":
         balance = context.facts.get("balance")
@@ -127,6 +147,9 @@ def build_fallback_response(context: ResponseContext) -> str:
     if status == "missing_card_fields":
         return pending_question(context)
 
+    if status == "invalid_payment_request":
+        return f"Some payment details are invalid. {pending_question(context)}"
+
     if status == "invalid_card":
         return "The card number appears to be invalid. Please share the full card number again."
 
@@ -137,10 +160,16 @@ def build_fallback_response(context: ResponseContext) -> str:
         return "The card expiry appears to be invalid or expired. Please share the expiry in MM/YYYY format again."
 
     if status in {"network_error", "timeout"}:
-        return "The payment service is currently unavailable. No payment has been processed. Please try again later."
+        return (
+            "The payment service is currently unavailable or the request timed out. "
+            "I cannot safely continue this payment in the chat. Please try again later."
+        )
 
     if status in {"invalid_response", "unexpected_status", "payment_failed"}:
-        return "The payment could not be processed due to a payment service issue. No payment has been processed."
+        return (
+            "The payment could not be processed due to a payment service issue. "
+            "I cannot safely continue this payment in the chat."
+        )
 
     if status == "payment_attempts_exhausted":
         return "Payment could not be completed after multiple attempts. No payment has been processed. This conversation is now closed."
