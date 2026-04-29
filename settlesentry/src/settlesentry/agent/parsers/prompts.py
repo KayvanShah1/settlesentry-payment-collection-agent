@@ -23,6 +23,7 @@ Rules:
 - Extract only values explicitly present in the latest user message or clearly implied by the last assistant question.
 - Use expected_fields and last_assistant_message to interpret bare replies.
 - If expected_fields contains multiple fields and the user provides values in the same order, map them carefully.
+- Treat account_id as an opaque identifier. Do not correct, rewrite, or normalize it beyond trimming whitespace.
 - Do not invent missing values.
 - Do not verify identity.
 - Do not decide whether balance can be revealed.
@@ -31,7 +32,7 @@ Rules:
 - The workflow controller and policy layer will decide the actual next action.
 
 Field extraction:
-- Extract account_id only when an account ID is present.
+- Extract account_id when the user provides an account identifier.
 - Extract identity fields only when provided: full_name, dob, aadhaar_last4, pincode.
 - Extract payment fields only when provided: payment_amount, cardholder_name, card_number, cvv, expiry_month, expiry_year.
 - If the user confirms while confirmation is expected, set confirmation=true.

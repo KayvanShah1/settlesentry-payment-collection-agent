@@ -78,8 +78,8 @@ class PaymentsClient:
         except ValidationError:
             result = LookupResult(
                 ok=False,
-                error_code=PaymentsAPIErrorCode.INVALID_RESPONSE,
-                message="Invalid account ID format.",
+                error_code=PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND,
+                message="No account found with the provided account ID.",
             )
             self._log_result(
                 context=context,

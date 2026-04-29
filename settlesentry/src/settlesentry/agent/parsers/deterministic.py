@@ -12,7 +12,13 @@ from settlesentry.agent.state import ExtractedUserInput
 
 
 class ParserPatterns:
-    ACCOUNT_ID: Pattern[str] = re.compile(r"\bACC\d+\b", re.IGNORECASE)
+    ACCOUNT_ID: Pattern[str] = re.compile(
+        r"(?i)\b(?:account\s*id|account_id|account|customer\s*id)\s*(?:is|:|=)?\s*"
+        r"(?P<account_id>[A-Za-z0-9][A-Za-z0-9_-]{0,63})\b"
+    )
+    BARE_ACCOUNT_ID: Pattern[str] = re.compile(
+        r"^\s*(?P<account_id>(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9][A-Za-z0-9_-]{1,63})\s*$"
+    )
 
     DOB: Pattern[str] = re.compile(
         r"(?i)\b(?:dob|date\s+of\s+birth)\s*(?:is|:|=)?\s*"
@@ -220,7 +226,7 @@ class DeterministicInputParser:
 
     def _extract_labeled_fields(self, text: str, extracted: dict[str, object]) -> None:
         if match := ParserPatterns.ACCOUNT_ID.search(text):
-            extracted["account_id"] = match.group(0).upper()
+            extracted["account_id"] = match.group("account_id").strip().upper()
 
         if match := ParserPatterns.FULL_NAME.search(text):
             extracted["full_name"] = self._clean_name(match.group("full_name"))
@@ -325,8 +331,8 @@ class DeterministicInputParser:
 
     @staticmethod
     def _extract_bare_account_id(text: str, extracted: dict[str, object]) -> None:
-        if match := ParserPatterns.ACCOUNT_ID.fullmatch(text.strip()):
-            extracted["account_id"] = match.group(0).upper()
+        if match := ParserPatterns.BARE_ACCOUNT_ID.fullmatch(text.strip()):
+            extracted["account_id"] = match.group("account_id").strip().upper()
 
     @staticmethod
     def _infer_intent_and_action(extracted: dict[str, object]) -> None:

@@ -20,7 +20,6 @@ from settlesentry.security.identity import validate_iso_date
 
 
 class Patterns:
-    ACCOUNT_ID = r"^ACC\d+$"
     AADHAAR_LAST4 = r"^\d{4}$"
     PINCODE = r"^\d{6}$"
     CVV = r"^\d{3,4}$"
@@ -88,8 +87,9 @@ class AccountLookupRequest(PaymentAPIModel):
 
     account_id: str = Field(
         ...,
-        pattern=Patterns.ACCOUNT_ID,
-        description="Account ID in ACC<digits> format.",
+        min_length=1,
+        max_length=64,
+        description="Opaque account identifier provided by the user.",
         examples=["ACC1001"],
     )
 
@@ -97,7 +97,7 @@ class AccountLookupRequest(PaymentAPIModel):
 class AccountDetails(PaymentAPIModel):
     """Normalized account details returned by successful account lookup."""
 
-    account_id: str = Field(..., pattern=Patterns.ACCOUNT_ID)
+    account_id: str = Field(..., min_length=1, max_length=64)
     full_name: str = Field(..., min_length=1, max_length=100)
     dob: str = Field(..., description="Date of birth in YYYY-MM-DD format.")
     aadhaar_last4: str = Field(..., pattern=Patterns.AADHAAR_LAST4)
@@ -150,7 +150,7 @@ class CardDetails(PaymentAPIModel):
         return digits
 
     @model_validator(mode="after")
-    def validate_card_consistency(self) -> CardDetails:
+    def validate_card_consistency(self) -> "CardDetails":
         is_amex = self.card_number.startswith(("34", "37")) and len(self.card_number) == 15
 
         if is_amex and len(self.cvv) != 4:
@@ -174,7 +174,7 @@ class PaymentMethod(PaymentAPIModel):
 class PaymentRequest(PaymentAPIModel):
     """Request payload for payment processing tool call."""
 
-    account_id: str = Field(..., pattern=Patterns.ACCOUNT_ID)
+    account_id: str = Field(..., min_length=1, max_length=64)
     amount: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)
     payment_method: PaymentMethod
 
