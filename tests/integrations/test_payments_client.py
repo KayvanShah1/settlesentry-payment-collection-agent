@@ -139,19 +139,26 @@ def test_lookup_account_200_with_unexpected_shape_returns_invalid_response():
     assert result.status_code == 200
 
 
-def test_lookup_account_invalid_account_id_is_rejected_before_api_call():
+def test_lookup_account_opaque_account_id_is_sent_to_api_and_not_found():
     calls = {"count": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls["count"] += 1
-        return json_response(500, {"message": "should not be called"})
+        return json_response(
+            404,
+            {
+                "error_code": "account_not_found",
+                "message": "No account found with the provided account ID.",
+            },
+        )
 
     result = make_client(handler).lookup_account("not-an-account-id")
 
     assert result.ok is False
-    assert result.error_code == PaymentsAPIErrorCode.INVALID_RESPONSE
-    assert result.message == "Invalid account ID format."
-    assert calls["count"] == 0
+    assert result.error_code == PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND
+    assert result.message == "No account found with the provided account ID."
+    assert result.status_code == 404
+    assert calls["count"] == 1
 
 
 def test_lookup_account_retries_transient_http_status():
@@ -387,7 +394,7 @@ def test_lookup_account_logs_endpoint_and_completed_events(monkeypatch: pytest.M
     assert isinstance(completed[0]["duration_ms"], int)
 
 
-def test_lookup_account_logs_validation_failure_without_http_call(monkeypatch: pytest.MonkeyPatch):
+def test_lookup_account_logs_account_not_found_with_http_call(monkeypatch: pytest.MonkeyPatch):
     emitted_info: list[tuple[str, dict[str, Any]]] = []
 
     def fake_info(message, *args, **kwargs):
@@ -395,16 +402,25 @@ def test_lookup_account_logs_validation_failure_without_http_call(monkeypatch: p
 
     monkeypatch.setattr(payments_client_module.logger, "info", fake_info)
 
-    result = make_client(lambda _request: json_response(500, {"message": "unused"})).lookup_account("bad-id")
+    result = make_client(
+        lambda _request: json_response(
+            404,
+            {
+                "error_code": "account_not_found",
+                "message": "No account found with the provided account ID.",
+            },
+        )
+    ).lookup_account("bad-id")
 
     assert result.ok is False
+    assert result.error_code == PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND
 
     failed = [extra for message, extra in emitted_info if message == "lookup_account_failed"]
 
     assert len(failed) == 1
-    assert failed[0]["http_call_made"] is False
-    assert failed[0]["error_code"] == PaymentsAPIErrorCode.INVALID_RESPONSE.value
-    assert failed[0]["status_code"] is None
+    assert failed[0]["http_call_made"] is True
+    assert failed[0]["error_code"] == PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND.value
+    assert failed[0]["status_code"] == 404
 
 
 def test_process_payment_logs_endpoint_and_completed_events(monkeypatch: pytest.MonkeyPatch):

@@ -21,11 +21,20 @@ from settlesentry.integrations.payments.schemas import (
     AccountDetails,
     LookupResult,
     PaymentResult,
+    PaymentsAPIErrorCode,
 )
 
 
 class FakePaymentsClient:
     def lookup_account(self, account_id: str) -> LookupResult:
+        if account_id != "ACC1001":
+            return LookupResult(
+                ok=False,
+                error_code=PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND,
+                message="No account found with the provided account ID.",
+                status_code=404,
+            )
+
         return LookupResult(
             ok=True,
             account=AccountDetails(
@@ -51,8 +60,19 @@ class FailingPaymentsClient(FakePaymentsClient):
     def process_payment(self, payment_request) -> PaymentResult:
         return PaymentResult(
             ok=False,
+            error_code=PaymentsAPIErrorCode.INVALID_CARD,
             message="The card number appears to be invalid.",
             status_code=422,
+        )
+
+
+class TimeoutPaymentsClient(FakePaymentsClient):
+    def process_payment(self, payment_request) -> PaymentResult:
+        return PaymentResult(
+            ok=False,
+            error_code=PaymentsAPIErrorCode.TIMEOUT,
+            message="The payment service took too long to respond.",
+            status_code=504,
         )
 
 
@@ -63,6 +83,25 @@ def make_deps(payments_client=None) -> AgentDeps:
         responder=DeterministicResponseGenerator(),
         grouped_card_collection=False,
     )
+
+
+def load_verified_account(deps: AgentDeps) -> None:
+    submit_user_input(deps, "ACC1001")
+    lookup_account(deps)
+    submit_user_input(deps, "Nithin Jain")
+    submit_user_input(deps, "1990-05-14")
+    verify_identity(deps)
+
+
+def collect_ready_payment(deps: AgentDeps) -> None:
+    load_verified_account(deps)
+    submit_user_input(deps, "500")
+    submit_user_input(deps, "Nithin Jain")
+    submit_user_input(deps, "4532 0151 1283 0366")
+    submit_user_input(deps, "12/2027")
+    submit_user_input(deps, "123")
+    prepare_payment(deps)
+    confirm_payment(deps, confirmed=True)
 
 
 def test_node_workflow_completes_successful_payment_and_recap():
@@ -131,14 +170,39 @@ def test_node_workflow_completes_successful_payment_and_recap():
     assert deps.state.step == ConversationStep.CLOSED
 
 
+def test_account_not_found_reprompts_for_account_id():
+    deps = make_deps()
+
+    submit_user_input(deps, "UNKNOWN123")
+    result = lookup_account(deps)
+
+    assert result.ok is False
+    assert result.status == "account_not_found"
+    assert result.required_fields == ("account_id",)
+    assert deps.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID
+    assert deps.state.has_account_loaded() is False
+
+
+def test_account_not_found_can_recover_with_valid_account():
+    deps = make_deps()
+
+    submit_user_input(deps, "UNKNOWN123")
+    lookup_account(deps)
+
+    result = submit_user_input(deps, "ACC1001")
+    assert result.recommended_tool == "lookup_account"
+
+    result = lookup_account(deps)
+    assert result.ok is True
+    assert result.status == "account_loaded"
+    assert deps.state.account_id == "ACC1001"
+    assert deps.state.has_account_loaded() is True
+
+
 def test_sequential_card_details_are_not_asked_again():
     deps = make_deps()
 
-    submit_user_input(deps, "ACC1001")
-    lookup_account(deps)
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "1990-05-14")
-    verify_identity(deps)
+    load_verified_account(deps)
     submit_user_input(deps, "500")
 
     result = submit_user_input(deps, "Nithin Jain")
@@ -195,18 +259,7 @@ def test_correction_with_no_field_asks_what_to_correct():
 def test_correction_of_payment_amount_clears_confirmation_not_verification():
     deps = make_deps()
 
-    submit_user_input(deps, "ACC1001")
-    lookup_account(deps)
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "1990-05-14")
-    verify_identity(deps)
-    submit_user_input(deps, "500")
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "4532 0151 1283 0366")
-    submit_user_input(deps, "12/2027")
-    submit_user_input(deps, "123")
-    prepare_payment(deps)
-    confirm_payment(deps, confirmed=True)
+    collect_ready_payment(deps)
 
     assert deps.state.payment_confirmed is True
 
@@ -222,11 +275,7 @@ def test_correction_of_payment_amount_clears_confirmation_not_verification():
 def test_correction_of_identity_resets_verification_and_payment_context():
     deps = make_deps()
 
-    submit_user_input(deps, "ACC1001")
-    lookup_account(deps)
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "1990-05-14")
-    verify_identity(deps)
+    load_verified_account(deps)
     submit_user_input(deps, "500")
 
     assert deps.state.verified is True
@@ -243,11 +292,7 @@ def test_correction_of_identity_resets_verification_and_payment_context():
 def test_process_payment_is_blocked_without_confirmation():
     deps = make_deps()
 
-    submit_user_input(deps, "ACC1001")
-    lookup_account(deps)
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "1990-05-14")
-    verify_identity(deps)
+    load_verified_account(deps)
     submit_user_input(deps, "500")
     submit_user_input(deps, "Nithin Jain")
     submit_user_input(deps, "4532 0151 1283 0366")
@@ -265,35 +310,37 @@ def test_process_payment_is_blocked_without_confirmation():
 def test_failed_payment_can_retry_missing_card_fields():
     deps = make_deps(FailingPaymentsClient())
 
-    submit_user_input(deps, "ACC1001")
-    lookup_account(deps)
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "1990-05-14")
-    verify_identity(deps)
-    submit_user_input(deps, "500")
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "4532 0151 1283 0366")
-    submit_user_input(deps, "12/2027")
-    submit_user_input(deps, "123")
-    prepare_payment(deps)
-    confirm_payment(deps, confirmed=True)
+    collect_ready_payment(deps)
 
     result = process_payment(deps)
 
     assert result.ok is False
-    assert "card_number" in result.required_fields
+    assert result.status == "invalid_card"
+    assert result.required_fields == ("card_number",)
     assert deps.state.card_number is None
     assert deps.state.completed is False
+
+
+def test_terminal_payment_service_error_closes_safely():
+    deps = make_deps(TimeoutPaymentsClient())
+
+    collect_ready_payment(deps)
+
+    result = process_payment(deps)
+
+    assert result.ok is False
+    assert result.status == "timeout"
+    assert deps.state.completed is True
+    assert deps.state.step == ConversationStep.CLOSED
+    assert deps.state.transaction_id is None
+    assert deps.state.card_number is None
+    assert deps.state.cvv is None
 
 
 def test_amount_exceeding_balance_is_blocked_before_card_collection():
     deps = make_deps()
 
-    submit_user_input(deps, "ACC1001")
-    lookup_account(deps)
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "1990-05-14")
-    verify_identity(deps)
+    load_verified_account(deps)
 
     result = submit_user_input(deps, "2000")
 
@@ -307,11 +354,7 @@ def test_amount_exceeding_balance_is_blocked_before_card_collection():
 def test_corrected_amount_exceeding_balance_is_blocked_before_payment_readiness():
     deps = make_deps()
 
-    submit_user_input(deps, "ACC1001")
-    lookup_account(deps)
-    submit_user_input(deps, "Nithin Jain")
-    submit_user_input(deps, "1990-05-14")
-    verify_identity(deps)
+    load_verified_account(deps)
     submit_user_input(deps, "500")
     submit_user_input(deps, "Nithin Jain")
     submit_user_input(deps, "4532 0151 1283 0366")

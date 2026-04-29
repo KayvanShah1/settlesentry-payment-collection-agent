@@ -10,11 +10,20 @@ from settlesentry.integrations.payments.schemas import (
     AccountDetails,
     LookupResult,
     PaymentResult,
+    PaymentsAPIErrorCode,
 )
 
 
 class FakePaymentsClient:
     def lookup_account(self, account_id: str) -> LookupResult:
+        if account_id != "ACC1001":
+            return LookupResult(
+                ok=False,
+                error_code=PaymentsAPIErrorCode.ACCOUNT_NOT_FOUND,
+                message="No account found with the provided account ID.",
+                status_code=404,
+            )
+
         return LookupResult(
             ok=True,
             account=AccountDetails(
@@ -73,6 +82,52 @@ def test_agent_can_progress_from_greeting_to_account_lookup():
     assert agent.state.has_account_loaded() is True
     assert agent.state.step == ConversationStep.WAITING_FOR_FULL_NAME
     assert "full name" in response["message"].lower()
+
+
+def test_agent_treats_account_id_as_opaque_and_uses_lookup_result():
+    agent = make_agent()
+
+    agent.next("Hi")
+    response = agent.next("AC1001")
+
+    message = response["message"].lower()
+
+    assert agent.state.account_id == "AC1001"
+    assert agent.state.has_account_loaded() is False
+    assert agent.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID
+    assert "account" in message
+    assert "could not find" in message
+    assert "payment could not be processed" not in message
+
+
+def test_agent_reprompts_when_account_not_found():
+    agent = make_agent()
+
+    agent.next("Hi")
+    response = agent.next("UNKNOWN123")
+
+    message = response["message"].lower()
+
+    assert agent.state.account_id == "UNKNOWN123"
+    assert agent.state.has_account_loaded() is False
+    assert agent.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID
+    assert "account" in message
+    assert "could not find" in message
+    assert "payment could not be processed" not in message
+
+
+def test_agent_recovers_after_account_not_found():
+    agent = make_agent()
+
+    agent.next("Hi")
+    first_response = agent.next("UNKNOWN123")
+    second_response = agent.next("ACC1001")
+
+    assert "could not find" in first_response["message"].lower()
+    assert agent.state.account_id == "ACC1001"
+    assert agent.state.has_account_loaded() is True
+    assert agent.state.step == ConversationStep.WAITING_FOR_FULL_NAME
+    assert "full name" in second_response["message"].lower()
 
 
 def test_agent_handles_side_question_without_losing_state():

@@ -43,9 +43,10 @@ def test_account_lookup_request_accepts_valid_account_id():
     assert request.account_id == "ACC1001"
 
 
-def test_account_lookup_request_rejects_invalid_account_id():
-    with pytest.raises(ValidationError):
-        AccountLookupRequest(account_id="BAD1001")
+def test_account_lookup_request_accepts_opaque_account_id():
+    request = AccountLookupRequest(account_id=" BAD1001 ")
+
+    assert request.account_id == "BAD1001"
 
 
 def test_account_details_accepts_valid_payload():
@@ -64,9 +65,9 @@ def test_account_details_rejects_invalid_non_leap_dob():
         _valid_account_details(dob="1989-02-29")
 
 
-def test_account_details_rejects_invalid_account_id():
-    with pytest.raises(ValidationError):
-        _valid_account_details(account_id="BAD1004")
+def test_account_details_accepts_opaque_account_id():
+    account = _valid_account_details(account_id="BAD1004")
+    assert account.account_id == "BAD1004"
 
 
 def test_account_details_rejects_invalid_aadhaar_last4():
@@ -146,13 +147,13 @@ def test_payment_request_rejects_more_than_two_decimal_places():
         )
 
 
-def test_payment_request_rejects_invalid_account_id():
-    with pytest.raises(ValidationError):
-        PaymentRequest(
-            account_id="BAD1001",
-            amount=Decimal("500.00"),
-            payment_method=PaymentMethod(card=_valid_non_amex_card()),
-        )
+def test_payment_request_accepts_opaque_account_id():
+    payment = PaymentRequest(
+        account_id="BAD1001",
+        amount=Decimal("500.00"),
+        payment_method=PaymentMethod(card=_valid_non_amex_card()),
+    )
+    assert payment.account_id == "BAD1001"
 
 
 def test_card_accepts_valid_non_amex():

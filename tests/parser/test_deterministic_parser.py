@@ -49,12 +49,12 @@ def test_account_id_is_extracted_and_normalized(parser: DeterministicInputParser
     assert result.proposed_action == ProposedAction.LOOKUP_ACCOUNT
 
 
-def test_invalid_account_id_is_not_extracted(parser: DeterministicInputParser):
+def test_opaque_account_id_is_extracted(parser: DeterministicInputParser):
     result = parser.extract("my account is AC1001")
 
-    assert result.account_id is None
-    assert result.intent == UserIntent.UNKNOWN
-    assert result.proposed_action == ProposedAction.NONE
+    assert result.account_id == "AC1001"
+    assert result.intent == UserIntent.LOOKUP_ACCOUNT
+    assert result.proposed_action == ProposedAction.LOOKUP_ACCOUNT
 
 
 def test_full_name_is_extracted_from_common_intro(parser: DeterministicInputParser):
