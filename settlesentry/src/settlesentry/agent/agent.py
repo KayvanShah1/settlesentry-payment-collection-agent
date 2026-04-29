@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
@@ -16,67 +17,67 @@ from settlesentry.core import OperationLogContext, get_logger, settings
 from settlesentry.integrations.payments.client import PaymentsClient
 
 logger = get_logger("Agent")
+
 RUN_USAGE_LIMITS = UsageLimits(
     request_limit=8,
     tool_calls_limit=6,
 )
 
 
+class AgentResponse(BaseModel):
+    """
+    Required public response shape.
+
+    Agent.next() returns this as a dict.
+    """
+
+    message: str = Field(min_length=1, max_length=700)
+
+
 AGENT_INSTRUCTIONS = """
 You are SettleSentry, a payment collection agent.
 
-You must use tools for state changes, verification, account lookup, payment readiness, confirmation, payment processing, and final recap.
+Use tools to control the workflow. Do not change state directly.
 
-Rules:
-- Always call submit_user_input first for each new user message.
-- If submit_user_input returns recommended_tool=greet_user, call greet_user before responding.
-- If the conversation is at START and the user only greets or starts the chat, submit_user_input should lead to greet_user.
-- greet_user should introduce SettleSentry and ask only for account ID.
-- When greet_user returns required_fields=account_id, ask only for account ID. Do not ask for any other information until after account lookup.
-- Use required_fields to ask only for missing information. Do not ask for future-step fields.
-- After any tool result with required_fields and no recommended_tool, ask only for those required_fields and end the turn.
-- Use recommended_tool when provided.
+Tool rules:
+- Always call submit_user_input first for each user message.
+- If any tool returns recommended_tool, call that tool before responding.
+- If a tool returns required_fields and no recommended_tool, ask only for the first missing field and end the turn.
+- greet_user should introduce SettleSentry, explain that you will help the user make a payment step by step, and ask only for account ID.
+- Never ask for future-step fields.
 - Never claim account lookup, verification, payment readiness, payment success, or closure unless a tool result says so.
 - Never reveal balance before identity_verified.
-- Do not ask for payment_amount until status=identity_verified or safe_state.verified=true.
-- Do not ask for card details until payment_amount is captured and safe_state.verified=true.
-- If status=identity_verification_failed, ask for full_name again and then one secondary factor in a new user turn. Do not call verify_identity_if_ready again in the same turn.
-- When asking for DOB, always request YYYY-MM-DD format.
-- When collecting card_number, ask for the full card number. Do not say last 4 digits are enough.
-- Only mention card last 4 digits during confirmation or recap.
-- Never process payment unless the user explicitly confirms and process_payment_if_allowed succeeds.
+- Never ask for payment amount before identity_verified.
+- Never ask for card details before payment_amount is captured and identity is verified.
+- Never process payment before explicit user confirmation.
 - If submit_user_input returns confirmation_received, call confirm_payment with confirmed=true.
 - If process_payment_if_allowed returns payment_success, call recap_and_close before final response.
 - If any tool returns recommended_tool=recap_and_close, call recap_and_close before final response.
 - If the user cancels or refuses, call cancel_payment_flow.
+
+Safety rules:
 - Do not expose tool internals, policy names, stack traces, raw state, DOB, Aadhaar, pincode, full card number, or CVV.
 - Use INR, never $.
+- Ask for DOB only in YYYY-MM-DD format.
+- Ask for the full card number when card_number is required.
+- Only mention card last 4 digits during confirmation or recap.
 - Never compute or claim an updated remaining balance after payment.
-- After payment_success, include the exact transaction_id from tool facts or state. Do not rewrite, shorten, or guess it.
-- Final recap must be concise and safe. It should mention whether payment was completed, transaction_id if present, amount if present, and that the conversation is closed.
-- If completed=true, do not continue collecting payment details.
-- Return only plain user-facing text. Do not return JSON, markdown fences, or a {"message": "..."} object.
+- Use transaction_id exactly as provided by the tool/state. Do not rewrite, shorten, or guess it.
 
-Expected flow:
-0. greet user and introduce yourself as SettleSentry, a payment collection assistant
-1. collect account ID
-2. look up account
-3. collect full name
-4. collect one secondary factor
-5. verify identity
-6. collect payment amount
-7. collect cardholder name, full card number, CVV, and expiry
-8. prepare payment and ask for explicit confirmation
-9. after explicit yes, confirm payment and process payment
-10. recap and close
+Response rules:
+- Return an AgentResponse object with only the message field.
+- The message must be concise, user-facing, and contain only one question.
+- Do not repeat the same question in different words.
+- If required_fields is present, ask only for the first required field.
+- If the conversation is closed, say it is closed and do not continue the flow.
 """.strip()
 
 
-def build_collection_agent() -> PydanticAgent[AgentDeps, str]:
+def build_collection_agent() -> PydanticAgent[AgentDeps, AgentResponse]:
     return PydanticAgent(
         model=_build_openrouter_model(),
         deps_type=AgentDeps,
-        output_type=str,
+        output_type=AgentResponse,
         instructions=AGENT_INSTRUCTIONS,
         name="SettleSentryAgent",
         retries=settings.llm.retries,
@@ -112,7 +113,7 @@ class Agent:
         self,
         *,
         payments_client: PaymentsClient | None = None,
-        pydantic_agent: PydanticAgent[AgentDeps, str] | None = None,
+        pydantic_agent: PydanticAgent[AgentDeps, AgentResponse] | None = None,
     ) -> None:
         self.deps = AgentDeps(
             payments_client=payments_client or PaymentsClient(),
@@ -136,10 +137,10 @@ class Agent:
             {"message": str}
         """
         if self.state.completed:
-            return {"message": self._closed_response()}
+            return AgentResponse(message=self._closed_response()).model_dump()
 
         if self.state.step == ConversationStep.PAYMENT_SUCCESS:
-            return {"message": self._finalize_success_response()}
+            return AgentResponse(message=self._finalize_success_response()).model_dump()
 
         operation = OperationLogContext(operation="agent_turn")
         step_before = self.state.step
@@ -152,16 +153,10 @@ class Agent:
                 usage_limits=RUN_USAGE_LIMITS,
             )
             self._message_history = self._extract_message_history(result)
-            output = self._extract_output(result)
+            response = self._extract_response(result)
 
             if self.state.step == ConversationStep.PAYMENT_SUCCESS and not self.state.completed:
-                output = self._finalize_success_response()
-
-            if not output.strip():
-                output = self._state_fallback_response()
-
-            if self.state.completed and not output.strip():
-                output = self._closed_response()
+                response = AgentResponse(message=self._finalize_success_response())
 
         except UsageLimitExceeded:
             logger.warning(
@@ -172,7 +167,7 @@ class Agent:
                     step_after=self.state.step.value,
                 ),
             )
-            output = self._state_fallback_response()
+            response = AgentResponse(message=self._state_fallback_response())
 
         except Exception as exc:
             logger.exception(
@@ -184,7 +179,7 @@ class Agent:
                     error_type=type(exc).__name__,
                 ),
             )
-            raise
+            response = AgentResponse(message=self._state_fallback_response())
 
         logger.info(
             "agent_turn_completed",
@@ -196,15 +191,9 @@ class Agent:
             ),
         )
 
-        return {"message": output}
+        return response.model_dump()
 
     def _finalize_success_response(self) -> str:
-        """
-        Deterministic fallback close for payment success.
-
-        This prevents the LLM from skipping recap_and_close, mutating the
-        transaction_id, claiming updated balance, or keeping the session open.
-        """
         amount = self._format_amount()
         transaction_id = self.state.transaction_id or "not available"
 
@@ -235,59 +224,69 @@ class Agent:
     def _state_fallback_response(self) -> str:
         if self.state.completed:
             return self._closed_response()
+
+        if self.state.step == ConversationStep.START:
+            return "Hello, I’m SettleSentry, your payment collection assistant. I will help you make a payment step by step."
+
         if self.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID:
-            return "Please provide your account ID."
+            return "Please share your account ID in ACC<digits> format, for example ACC1001."
+
         if self.state.step == ConversationStep.WAITING_FOR_FULL_NAME:
-            return "I couldn't verify your details yet. Please share your full name exactly as registered on the account."
+            return "Please share your full name exactly as registered on the account."
+
         if self.state.step == ConversationStep.WAITING_FOR_SECONDARY_FACTOR:
-            return (
-                "Please provide one secondary factor for verification: "
-                "DOB in YYYY-MM-DD, Aadhaar last 4 digits, or pincode."
-            )
+            return "Please share one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode."
+
         if self.state.step == ConversationStep.WAITING_FOR_PAYMENT_AMOUNT:
             return "Please share the payment amount in INR."
+
         if self.state.step == ConversationStep.WAITING_FOR_CARDHOLDER_NAME:
-            return "Please provide the cardholder name."
+            return "Please share the cardholder name."
+
         if self.state.step == ConversationStep.WAITING_FOR_CARD_NUMBER:
-            return "Please provide the full card number."
+            return "Please share the full card number."
+
         if self.state.step == ConversationStep.WAITING_FOR_CVV:
-            return "Please provide the CVV."
+            return "Please share the CVV."
+
         if self.state.step == ConversationStep.WAITING_FOR_EXPIRY:
-            return "Please provide the card expiry in MM/YY format."
+            return "Please share the card expiry in MM/YYYY format."
+
         if self.state.step == ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION:
             return f"Please confirm the payment of {self._format_amount()} by replying yes or no."
+
         if self.state.step == ConversationStep.PAYMENT_SUCCESS:
             return self._finalize_success_response()
 
-        return "Please provide the requested details to continue."
+        return "Please provide the requested detail to continue."
 
     @staticmethod
-    def _extract_output(result: object) -> str:
+    def _extract_response(result: object) -> AgentResponse:
         output = getattr(result, "output", None)
 
         if output is None:
             output = getattr(result, "data", None)
 
-        if output is None:
-            return ""
+        if isinstance(output, AgentResponse):
+            return output
 
-        if not isinstance(output, str):
-            return str(output)
+        if isinstance(output, str):
+            text = output.strip()
 
-        text = output.strip()
+            if not text:
+                raise ValueError("Agent output message is empty.")
 
-        if text.startswith("```"):
-            text = text.strip("`").removeprefix("json").strip()
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return AgentResponse(message=text)
 
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            return text
+            if isinstance(parsed, dict) and isinstance(parsed.get("message"), str):
+                return AgentResponse(message=parsed["message"])
 
-        if isinstance(parsed, dict) and isinstance(parsed.get("message"), str):
-            return parsed["message"]
+            return AgentResponse(message=text)
 
-        return text
+        return AgentResponse.model_validate(output)
 
     @staticmethod
     def _extract_message_history(result: object) -> list[Any]:

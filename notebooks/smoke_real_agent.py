@@ -25,6 +25,26 @@ def print_turn(role: str, message: str) -> None:
     print(message)
 
 
+def response_message(response: dict[str, str]) -> str:
+    """
+    Validate the assignment response shape and return the user-facing message.
+    """
+    if not isinstance(response, dict):
+        raise TypeError(f"Agent.next() must return dict, got {type(response).__name__}")
+
+    message = response.get("message")
+
+    if not isinstance(message, str):
+        raise TypeError("Agent.next() must return {'message': str}")
+
+    return message
+
+
+def print_safe_state(agent: Agent) -> None:
+    print("\nFinal safe state:")
+    print(agent.state.safe_view(session_id=agent.session_id).model_dump_json(indent=2))
+
+
 def run_happy_path() -> None:
     agent = Agent()
 
@@ -35,12 +55,14 @@ def run_happy_path() -> None:
         print_turn("USER", user_message)
 
         response = agent.next(user_message)
-        message = response.get("message", "")
+        message = response_message(response)
 
         print_turn("AGENT", message)
 
-    print("\nFinal safe state:")
-    print(agent.state.safe_view(session_id=agent.session_id).model_dump_json(indent=2))
+        if agent.state.completed:
+            break
+
+    print_safe_state(agent)
 
 
 def run_interactive() -> None:
@@ -56,11 +78,13 @@ def run_interactive() -> None:
             break
 
         response = agent.next(user_message)
-        print(f"AGENT: {response.get('message', '')}\n")
+        message = response_message(response)
+
+        print(f"AGENT: {message}\n")
 
         if agent.state.completed:
             print("Conversation completed.")
-            print(agent.state.safe_view(session_id=agent.session_id).model_dump_json(indent=2))
+            print_safe_state(agent)
             break
 
 

@@ -16,7 +16,7 @@ from settlesentry.agent.policy import (
     PolicyReason,
     identity_matches_account,
 )
-from settlesentry.agent.state import ConversationStep, ExtractedUserInput, SafeConversationState
+from settlesentry.agent.state import ConversationStep, SafeConversationState
 from settlesentry.agent.tools.models import AgentToolResult
 from settlesentry.core import OperationLogContext, get_logger, settings
 
@@ -32,9 +32,6 @@ def safe_state_summary(deps: AgentDeps) -> SafeConversationState:
 def greet_user(ctx: RunContext[AgentDeps]) -> AgentToolResult:
     """
     Start the payment collection flow and ask for account ID.
-
-    This tool performs the initial state transition from START to
-    WAITING_FOR_ACCOUNT_ID.
     """
     deps = ctx.deps
     operation = OperationLogContext(operation="greet_user")
@@ -58,23 +55,12 @@ def greet_user(ctx: RunContext[AgentDeps]) -> AgentToolResult:
 def submit_user_input(
     ctx: RunContext[AgentDeps],
     user_input: str,
-    account_id: str | None = None,
-    full_name: str | None = None,
-    dob: str | None = None,
-    aadhaar_last4: str | None = None,
-    pincode: str | None = None,
-    payment_amount: str | None = None,
-    cardholder_name: str | None = None,
-    card_number: str | None = None,
-    cvv: str | None = None,
-    expiry_month: int | None = None,
-    expiry_year: int | None = None,
 ) -> AgentToolResult:
     """
     Capture user input into state.
 
-    Use this first on every user turn. Confirmation is detected but not applied;
-    the agent must call confirm_payment after explicit user confirmation.
+    The LLM must pass only the raw user_input. Field extraction is handled by
+    the deterministic parser using the current expected state.
     """
     deps = ctx.deps
     operation = OperationLogContext(operation="submit_user_input")
@@ -90,37 +76,6 @@ def submit_user_input(
     try:
         extracted = deps.parser.extract(user_input, context=context)
 
-        if extracted.intent == UserIntent.CANCEL or extracted.proposed_action == ProposedAction.CANCEL:
-            deps.state.mark_closed()
-            _clear_payment_secrets(deps)
-            return _result(deps, operation, ok=True, status="cancelled")
-
-        confirmation_received = extracted.confirmation is True
-
-        # Confirmation is handled by confirm_payment(), not by state.merge().
-        deps.state.merge(extracted.model_copy(update={"confirmation": None}))
-
-        explicit_data = {
-            key: value
-            for key, value in {
-                "account_id": account_id,
-                "full_name": full_name,
-                "dob": dob,
-                "aadhaar_last4": aadhaar_last4,
-                "pincode": pincode,
-                "payment_amount": payment_amount,
-                "cardholder_name": cardholder_name,
-                "card_number": card_number,
-                "cvv": cvv,
-                "expiry_month": expiry_month,
-                "expiry_year": expiry_year,
-            }.items()
-            if value not in (None, "")
-        }
-
-        if explicit_data:
-            deps.state.merge(ExtractedUserInput.model_validate(explicit_data))
-
     except ValidationError as exc:
         return _result(
             deps,
@@ -130,6 +85,16 @@ def submit_user_input(
             required_fields=_expected_fields(deps),
             facts={"error_type": type(exc).__name__},
         )
+
+    if extracted.intent == UserIntent.CANCEL or extracted.proposed_action == ProposedAction.CANCEL:
+        deps.state.mark_closed()
+        _clear_payment_secrets(deps)
+        return _result(deps, operation, ok=True, status="cancelled")
+
+    confirmation_received = extracted.confirmation is True
+
+    # Confirmation is handled by confirm_payment(), not by state.merge().
+    deps.state.merge(extracted.model_copy(update={"confirmation": None}))
 
     if confirmation_received:
         deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
@@ -438,7 +403,7 @@ def _result(
     result = AgentToolResult(
         ok=ok,
         status=status,
-        message=_default_message(status),
+        message="",
         required_fields=required_fields,
         recommended_tool=recommended_tool,
         facts=facts or {},
@@ -487,20 +452,28 @@ def _expected_fields(deps: AgentDeps) -> tuple[ExpectedField, ...]:
 
     if step in {ConversationStep.START, ConversationStep.WAITING_FOR_ACCOUNT_ID}:
         return ("account_id",)
+
     if step == ConversationStep.WAITING_FOR_FULL_NAME:
         return ("full_name",)
+
     if step == ConversationStep.WAITING_FOR_SECONDARY_FACTOR:
         return ("dob", "aadhaar_last4", "pincode")
+
     if step == ConversationStep.WAITING_FOR_PAYMENT_AMOUNT:
         return ("payment_amount",)
+
     if step == ConversationStep.WAITING_FOR_CARDHOLDER_NAME:
         return ("cardholder_name",)
+
     if step == ConversationStep.WAITING_FOR_CARD_NUMBER:
         return ("card_number",)
+
     if step == ConversationStep.WAITING_FOR_CVV:
         return ("cvv",)
+
     if step == ConversationStep.WAITING_FOR_EXPIRY:
         return ("expiry",)
+
     if step == ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION:
         return ("confirmation",)
 
@@ -512,26 +485,37 @@ def _required_fields(deps: AgentDeps) -> tuple[str, ...]:
 
     if state.completed:
         return ()
+
     if not state.account_id:
         return ("account_id",)
+
     if not state.has_account_loaded():
         return ()
+
     if not state.verified:
         if not state.provided_full_name:
             return ("full_name",)
+
         if not state.has_secondary_factor():
             return ("dob_or_aadhaar_last4_or_pincode",)
+
         return ()
+
     if state.payment_amount is None:
         return ("payment_amount",)
+
     if not state.cardholder_name:
         return ("cardholder_name",)
+
     if not state.card_number:
         return ("card_number",)
+
     if not state.cvv:
         return ("cvv",)
+
     if not state.expiry_month or not state.expiry_year:
         return ("expiry",)
+
     if not state.payment_confirmed:
         return ("confirmation",)
 
@@ -562,10 +546,13 @@ def _required_fields_for_policy_reason(
 ) -> tuple[str, ...]:
     if reason == PolicyReason.MISSING_ACCOUNT_ID:
         return ("account_id",)
+
     if reason == PolicyReason.MISSING_FULL_NAME:
         return ("full_name",)
+
     if reason in {PolicyReason.MISSING_SECONDARY_FACTOR, PolicyReason.IDENTITY_NOT_VERIFIED}:
         return ("dob_or_aadhaar_last4_or_pincode",)
+
     if reason in {
         PolicyReason.MISSING_PAYMENT_AMOUNT,
         PolicyReason.INVALID_PAYMENT_AMOUNT,
@@ -574,10 +561,13 @@ def _required_fields_for_policy_reason(
         PolicyReason.PARTIAL_PAYMENT_NOT_ALLOWED,
     }:
         return ("payment_amount",)
+
     if reason == PolicyReason.MISSING_CARD_FIELDS:
         return _missing_card_fields(deps)
+
     if reason == PolicyReason.INVALID_PAYMENT_REQUEST:
         return ("card_number", "cvv", "expiry")
+
     if reason == PolicyReason.PAYMENT_NOT_CONFIRMED:
         return ("confirmation",)
 
@@ -590,10 +580,13 @@ def _missing_card_fields(deps: AgentDeps) -> tuple[str, ...]:
 
     if not state.cardholder_name:
         missing.append("cardholder_name")
+
     if not state.card_number:
         missing.append("card_number")
+
     if not state.cvv:
         missing.append("cvv")
+
     if not state.expiry_month or not state.expiry_year:
         missing.append("expiry")
 
@@ -617,31 +610,6 @@ def _set_step(deps: AgentDeps, required_fields: tuple[str, ...]) -> None:
     }
 
     deps.state.step = step_by_field.get(required_fields[0], deps.state.step)
-
-
-def _default_message(status: str) -> str:
-    return {
-        "greeting": "Greet the user and then ask for account ID.",
-        "conversation_closed": "Conversation closed. Use facts to provide a safe recap.",
-        "cancelled": "Payment flow cancelled. No payment has been processed.",
-        "invalid_user_input": (
-            "Some provided details are invalid. Ask only for required_fields "
-            "and wait for the user's next reply."
-        ),
-        "account_lookup_failed": "No account was found for the provided account ID.",
-        "identity_verified": "Identity verified. Share the balance and ask for payment amount.",
-        "identity_verification_failed": (
-            "Identity verification failed. Ask for full_name again, then ask for "
-            "one secondary factor. Do not call verify_identity_if_ready again in "
-            "the same turn."
-        ),
-        "verification_exhausted": "Verification attempts are exhausted. No payment has been processed.",
-        "payment_ready_for_confirmation": "Payment details are ready. Ask for explicit confirmation.",
-        "payment_confirmed": "Payment confirmed. Process payment next.",
-        "payment_not_confirmed": "Payment has not been confirmed. No payment has been processed.",
-        "payment_success": "Payment processed successfully. Call recap_and_close.",
-        "payment_attempts_exhausted": "Payment attempts are exhausted. Call recap_and_close.",
-    }.get(status, "")
 
 
 def _clear_identity_inputs(deps: AgentDeps) -> None:
