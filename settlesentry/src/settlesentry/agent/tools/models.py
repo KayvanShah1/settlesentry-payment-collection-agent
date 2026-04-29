@@ -17,7 +17,6 @@ class AgentToolResult(BaseModel):
 
     ok: bool
     status: str
-    message: str = ""
     required_fields: tuple[str, ...] = ()
     recommended_tool: str | None = None
     facts: dict[str, Any] = Field(default_factory=dict)

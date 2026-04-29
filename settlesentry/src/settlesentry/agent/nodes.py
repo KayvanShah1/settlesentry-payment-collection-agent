@@ -574,7 +574,6 @@ def _result(
     result = AgentToolResult(
         ok=ok,
         status=status,
-        message="",
         required_fields=required_fields,
         recommended_tool=recommended_tool,
         facts=facts or {},
