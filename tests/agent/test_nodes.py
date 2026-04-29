@@ -370,3 +370,25 @@ def test_corrected_amount_exceeding_balance_is_blocked_before_payment_readiness(
     assert deps.state.payment_amount is None
     assert deps.state.payment_confirmed is False
     assert deps.state.step == ConversationStep.WAITING_FOR_PAYMENT_AMOUNT
+
+
+def test_out_of_order_account_and_verification_details_continue_to_verification():
+    deps = make_deps()
+
+    result = submit_user_input(deps, "My account is ACC1001, my name is Nithin Jain and DOB is 1990-05-14")
+
+    assert result.recommended_tool == "lookup_account"
+
+    result = lookup_account(deps)
+
+    assert result.ok is True
+    assert result.status == "account_loaded"
+    assert result.required_fields == ()
+    assert result.recommended_tool == "verify_identity"
+
+    result = verify_identity(deps)
+
+    assert result.ok is True
+    assert result.status == "identity_verified"
+    assert deps.state.verified is True
+    assert result.required_fields == ("payment_amount",)

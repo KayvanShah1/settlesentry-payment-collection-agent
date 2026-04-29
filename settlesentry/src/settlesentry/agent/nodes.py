@@ -327,14 +327,18 @@ def lookup_account(deps: AgentDeps) -> AgentToolResult:
         )
 
     deps.state.account = result.account
-    deps.state.step = ConversationStep.WAITING_FOR_FULL_NAME
+
+    fields = required_fields(deps)
+    node = recommended_node(deps)
+    set_step_from_required_fields(deps, fields)
 
     return _result(
         deps,
         operation,
         ok=True,
         status="account_loaded",
-        required_fields=("full_name",),
+        required_fields=fields,
+        recommended_tool=node,
     )
 
 
