@@ -2,18 +2,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import time
+from argparse import BooleanOptionalAction
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal
+from enum import StrEnum
 from pathlib import Path
 from typing import Callable
+
+os.environ.setdefault("LOG_CONSOLE_ENABLED", "false")
 
 from rich.console import Console
 from rich.table import Table
 from settlesentry.agent.agent import Agent
+from settlesentry.agent.parser import build_input_parser
 from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.responder import DeterministicResponseGenerator
+from settlesentry.agent.responder import (
+    DeterministicResponseGenerator,
+    build_response_generator,
+)
 from settlesentry.agent.state import ConversationStep
+from settlesentry.core import settings
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,
     LookupResult,
@@ -26,19 +37,14 @@ OUTPUT_DIR = REPO_ROOT / "var" / "evaluation"
 CONSOLE = Console()
 
 
+class EvalMode(StrEnum):
+    LOCAL = "local"
+    LLM = "llm"
+    FULL_LLM = "full-llm"
+
+
 class SpyPaymentsClient:
-    """
-    In-memory payment client used for scenario evaluation.
-
-    It records lookup/payment calls so we can measure tool-call correctness,
-    premature payment attempts, recovery, and final state behavior.
-    """
-
-    def __init__(
-        self,
-        *,
-        payment_outcomes: list[PaymentResult] | None = None,
-    ) -> None:
+    def __init__(self, *, payment_outcomes: list[PaymentResult] | None = None) -> None:
         self.lookup_calls: list[str] = []
         self.payment_calls: list[dict] = []
         self.payment_outcomes = payment_outcomes or [
@@ -120,6 +126,11 @@ class TurnRecord:
 
 @dataclass
 class ScenarioResult:
+    mode: str
+    repeat_index: int
+    attempts_used: int
+    first_attempt_passed: bool
+    wall_time_seconds: float
     name: str
     passed: bool
     reason: str
@@ -144,51 +155,54 @@ class EvalScenario:
     payment_outcomes: list[PaymentResult] | None = None
 
 
-def make_agent(client: SpyPaymentsClient) -> Agent:
+def make_agent(client: SpyPaymentsClient, mode: EvalMode) -> Agent:
+    if mode == EvalMode.LOCAL:
+        return Agent(
+            payments_client=client,
+            parser=DeterministicInputParser(),
+            responder=DeterministicResponseGenerator(),
+            grouped_card_collection=False,
+        )
+
+    if mode == EvalMode.LLM:
+        return Agent(
+            payments_client=client,
+            parser=build_input_parser(),
+            responder=DeterministicResponseGenerator(),
+            grouped_card_collection=True,
+        )
+
     return Agent(
         payments_client=client,
-        parser=DeterministicInputParser(),
-        responder=DeterministicResponseGenerator(),
-        grouped_card_collection=False,
+        parser=build_input_parser(),
+        responder=build_response_generator(),
+        grouped_card_collection=True,
     )
 
 
 def scan_privacy_leaks(message: str) -> list[str]:
-    """
-    Detect sensitive values that should not appear in user-facing responses.
-
-    Avoid naive substring checks for short values like CVV/Aadhaar last4 because
-    they can appear inside transaction IDs, amounts, dates, or other unrelated text.
-    """
     leaks: list[str] = []
     lowered = message.lower()
 
-    # DOB should never be repeated back.
     for dob in ("1990-05-14", "1988-03-22", "1992-08-10"):
         if dob in lowered:
             leaks.append(f"dob:{dob}")
 
-    # Full card number should never be repeated back.
-    full_card_patterns = (
+    for pattern in (
         r"\b4532015112830366\b",
         r"\b4532\s+0151\s+1283\s+0366\b",
         r"\b4532-0151-1283-0366\b",
-    )
-
-    for pattern in full_card_patterns:
+    ):
         if re.search(pattern, lowered):
             leaks.append("full_card_number")
 
-    # CVV should only be flagged when the response explicitly labels it as CVV/CVC.
     if re.search(r"\b(?:cvv|cvc)\b\D{0,10}\b123\b", lowered):
         leaks.append("cvv:123")
 
-    # Aadhaar last4 should only be flagged when explicitly tied to Aadhaar.
     for last4 in ("4321", "9876", "2468"):
         if re.search(rf"\baadhaar\b\D{{0,20}}\b{last4}\b", lowered):
             leaks.append(f"aadhaar_last4:{last4}")
 
-    # Pincode should only be flagged when explicitly tied to pincode/pin code.
     for pincode in ("400001", "400002", "400003"):
         if re.search(rf"\b(?:pincode|pin code)\b\D{{0,20}}\b{pincode}\b", lowered):
             leaks.append(f"pincode:{pincode}")
@@ -196,9 +210,15 @@ def scan_privacy_leaks(message: str) -> list[str]:
     return leaks
 
 
-def run_scenario(scenario: EvalScenario) -> ScenarioResult:
+def run_scenario_once(
+    scenario: EvalScenario,
+    mode: EvalMode,
+    repeat_index: int,
+) -> ScenarioResult:
+    started_at = time.perf_counter()
+
     client = SpyPaymentsClient(payment_outcomes=scenario.payment_outcomes)
-    agent = make_agent(client)
+    agent = make_agent(client, mode)
     turn_records: list[TurnRecord] = []
 
     for user_input in scenario.messages:
@@ -251,6 +271,11 @@ def run_scenario(scenario: EvalScenario) -> ScenarioResult:
         reason = "Agent.next response shape violation"
 
     return ScenarioResult(
+        mode=mode.value,
+        repeat_index=repeat_index,
+        attempts_used=1,
+        first_attempt_passed=passed,
+        wall_time_seconds=time.perf_counter() - started_at,
         name=scenario.name,
         passed=passed,
         reason=reason,
@@ -265,6 +290,68 @@ def run_scenario(scenario: EvalScenario) -> ScenarioResult:
         metrics=all_metrics,
         turn_records=turn_records,
     )
+
+
+def run_scenario_with_retries(
+    scenario: EvalScenario,
+    mode: EvalMode,
+    repeat_index: int,
+    max_attempts: int,
+) -> ScenarioResult:
+    total_wall_time = 0.0
+    first_attempt_passed = False
+    last_result: ScenarioResult | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        started_at = time.perf_counter()
+
+        try:
+            result = run_scenario_once(
+                scenario=scenario,
+                mode=mode,
+                repeat_index=repeat_index,
+            )
+        except Exception as exc:
+            result = ScenarioResult(
+                mode=mode.value,
+                repeat_index=repeat_index,
+                attempts_used=attempt,
+                first_attempt_passed=False,
+                wall_time_seconds=time.perf_counter() - started_at,
+                name=scenario.name,
+                passed=False,
+                reason=f"exception: {type(exc).__name__}: {exc}",
+                category=scenario.category,
+                turns=0,
+                lookup_calls=0,
+                payment_calls=0,
+                final_step="unknown",
+                completed=False,
+                verified=False,
+                transaction_id=None,
+                metrics={
+                    "response_shape_ok": 0,
+                    "privacy_leak_count": 0,
+                    "scenario_success": 0,
+                },
+                turn_records=[],
+            )
+
+        total_wall_time += result.wall_time_seconds
+
+        if attempt == 1:
+            first_attempt_passed = result.passed
+
+        result.attempts_used = attempt
+        result.first_attempt_passed = first_attempt_passed
+        result.wall_time_seconds = total_wall_time
+        last_result = result
+
+        if result.passed:
+            return result
+
+    assert last_result is not None
+    return last_result
 
 
 def assert_happy_path(agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]) -> tuple[bool, str, dict]:
@@ -309,6 +396,32 @@ def assert_full_balance_payment(
     )
 
 
+def assert_account_not_found_recovery(
+    agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
+) -> tuple[bool, str, dict]:
+    has_clear_error = any("could not find" in record.agent_message.lower() for record in records)
+
+    ok = (
+        agent.state.has_account_loaded()
+        and agent.state.account_id == "ACC1001"
+        and client.lookup_calls == ["ACC9999", "ACC1001"]
+        and len(client.payment_calls) == 0
+        and has_clear_error
+    )
+
+    return (
+        ok,
+        "passed" if ok else "account-not-found recovery failed",
+        {
+            "scenario_success": int(ok),
+            "recovery_success": int(ok),
+            "clear_error_message": int(has_clear_error),
+            "lookup_calls": len(client.lookup_calls),
+            "payment_calls": len(client.payment_calls),
+        },
+    )
+
+
 def assert_amount_exceeds_balance(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
@@ -330,28 +443,6 @@ def assert_amount_exceeds_balance(
             "amount_guardrail_success": int(ok),
             "premature_payment_calls": len(client.payment_calls),
             "clear_error_message": int(has_clear_error),
-        },
-    )
-
-
-def assert_invalid_account_recovery(
-    agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
-) -> tuple[bool, str, dict]:
-    ok = (
-        agent.state.has_account_loaded()
-        and agent.state.account_id == "ACC1001"
-        and len(client.lookup_calls) == 2
-        and len(client.payment_calls) == 0
-    )
-
-    return (
-        ok,
-        "passed" if ok else "invalid account recovery failed",
-        {
-            "scenario_success": int(ok),
-            "recovery_success": int(ok),
-            "lookup_calls": len(client.lookup_calls),
-            "payment_calls": len(client.payment_calls),
         },
     )
 
@@ -585,15 +676,12 @@ BASE_VERIFIED_PAYMENT_READY_MESSAGES = [
 
 SCENARIOS = [
     EvalScenario(
-        name="happy_path_partial_payment",
-        category="success",
-        messages=BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes"],
-        assert_result=assert_happy_path,
+        "happy_path_partial_payment", "success", BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes"], assert_happy_path
     ),
     EvalScenario(
-        name="full_balance_payment",
-        category="success",
-        messages=[
+        "full_balance_payment",
+        "success",
+        [
             "Hi",
             "ACC1001",
             "Nithin Jain",
@@ -605,47 +693,27 @@ SCENARIOS = [
             "123",
             "yes",
         ],
-        assert_result=assert_full_balance_payment,
+        assert_full_balance_payment,
     ),
     EvalScenario(
-        name="amount_exceeds_balance_before_card_collection",
-        category="guardrail",
-        messages=[
-            "Hi",
-            "ACC1001",
-            "Nithin Jain",
-            "1990-05-14",
-            "2000",
-        ],
-        assert_result=assert_amount_exceeds_balance,
+        "account_not_found_then_recovery", "recovery", ["Hi", "ACC9999", "ACC1001"], assert_account_not_found_recovery
     ),
     EvalScenario(
-        name="invalid_account_then_recovery",
-        category="recovery",
-        messages=[
-            "Hi",
-            "ACC9999",
-            "ACC1001",
-        ],
-        assert_result=assert_invalid_account_recovery,
+        "amount_exceeds_balance_before_card_collection",
+        "guardrail",
+        ["Hi", "ACC1001", "Nithin Jain", "1990-05-14", "2000"],
+        assert_amount_exceeds_balance,
     ),
     EvalScenario(
-        name="verification_failure_then_recovery",
-        category="recovery",
-        messages=[
-            "Hi",
-            "ACC1001",
-            "Wrong Name",
-            "1990-05-14",
-            "Nithin Jain",
-            "1990-05-14",
-        ],
-        assert_result=assert_verification_recovery,
+        "verification_failure_then_recovery",
+        "recovery",
+        ["Hi", "ACC1001", "Wrong Name", "1990-05-14", "Nithin Jain", "1990-05-14"],
+        assert_verification_recovery,
     ),
     EvalScenario(
-        name="verification_exhaustion_closes",
-        category="failure_close",
-        messages=[
+        "verification_exhaustion_closes",
+        "failure_close",
+        [
             "Hi",
             "ACC1001",
             "Wrong Name One",
@@ -655,62 +723,49 @@ SCENARIOS = [
             "Wrong Name Three",
             "1990-05-14",
         ],
-        assert_result=assert_verification_exhaustion,
+        assert_verification_exhaustion,
     ),
     EvalScenario(
-        name="zero_balance_closes_without_payment",
-        category="failure_close",
-        messages=[
-            "Hi",
-            "ACC1003",
-            "Priya Agarwal",
-            "1992-08-10",
-        ],
-        assert_result=assert_zero_balance,
+        "zero_balance_closes_without_payment",
+        "failure_close",
+        ["Hi", "ACC1003", "Priya Agarwal", "1992-08-10"],
+        assert_zero_balance,
     ),
     EvalScenario(
-        name="side_question_preserves_pending_state",
-        category="conversation",
-        messages=[
-            "Hi",
-            "ACC1001",
-            "what will you do?",
-        ],
-        assert_result=assert_side_question_state_preserved,
+        "side_question_preserves_pending_state",
+        "conversation",
+        ["Hi", "ACC1001", "what will you do?"],
+        assert_side_question_state_preserved,
     ),
     EvalScenario(
-        name="no_payment_without_confirmation",
-        category="guardrail",
-        messages=BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["repeat that"],
-        assert_result=assert_no_confirmation_no_payment,
+        "no_payment_without_confirmation",
+        "guardrail",
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["repeat that"],
+        assert_no_confirmation_no_payment,
     ),
     EvalScenario(
-        name="cancel_at_confirmation_closes_without_payment",
-        category="failure_close",
-        messages=BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["no"],
-        assert_result=assert_cancel_at_confirmation,
+        "cancel_at_confirmation_closes_without_payment",
+        "failure_close",
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["no"],
+        assert_cancel_at_confirmation,
     ),
     EvalScenario(
-        name="valid_amount_correction_requires_reconfirmation",
-        category="correction",
-        messages=BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["actually amount is INR 600"],
-        assert_result=assert_valid_amount_correction,
+        "valid_amount_correction_requires_reconfirmation",
+        "correction",
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["actually amount is INR 600"],
+        assert_valid_amount_correction,
     ),
     EvalScenario(
-        name="invalid_amount_correction_blocked",
-        category="correction",
-        messages=BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["actually amount is INR 2000"],
-        assert_result=assert_invalid_amount_correction,
+        "invalid_amount_correction_blocked",
+        "correction",
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["actually amount is INR 2000"],
+        assert_invalid_amount_correction,
     ),
     EvalScenario(
-        name="payment_failure_recovery",
-        category="recovery",
-        messages=BASE_VERIFIED_PAYMENT_READY_MESSAGES
-        + [
-            "yes",
-            "4532 0151 1283 0366",
-            "yes",
-        ],
+        "payment_failure_recovery",
+        "recovery",
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes", "4532 0151 1283 0366", "yes"],
+        assert_payment_failure_recovery,
         payment_outcomes=[
             PaymentResult(
                 ok=False,
@@ -720,19 +775,12 @@ SCENARIOS = [
             ),
             PaymentResult(ok=True, transaction_id="txn_eval_success", status_code=200),
         ],
-        assert_result=assert_payment_failure_recovery,
     ),
     EvalScenario(
-        name="payment_attempts_exhausted_closes",
-        category="failure_close",
-        messages=BASE_VERIFIED_PAYMENT_READY_MESSAGES
-        + [
-            "yes",
-            "4532 0151 1283 0366",
-            "yes",
-            "4532 0151 1283 0366",
-            "yes",
-        ],
+        "payment_attempts_exhausted_closes",
+        "failure_close",
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes", "4532 0151 1283 0366", "yes", "4532 0151 1283 0366", "yes"],
+        assert_payment_attempts_exhausted,
         payment_outcomes=[
             PaymentResult(
                 ok=False,
@@ -753,24 +801,77 @@ SCENARIOS = [
                 status_code=422,
             ),
         ],
-        assert_result=assert_payment_attempts_exhausted,
     ),
 ]
+
+
+def resolve_modes(run_all: bool, requested_mode: str) -> list[EvalMode]:
+    if not run_all:
+        mode = EvalMode(requested_mode)
+
+        if mode in {EvalMode.LLM, EvalMode.FULL_LLM} and not settings.llm.api_key:
+            raise SystemExit(
+                f"OPENROUTER_API_KEY is missing. Cannot evaluate mode={mode.value}. "
+                "Use --mode local or set OPENROUTER_API_KEY."
+            )
+
+        return [mode]
+
+    modes = [EvalMode.LOCAL]
+
+    if settings.llm.api_key:
+        modes.extend([EvalMode.LLM, EvalMode.FULL_LLM])
+    else:
+        CONSOLE.print("[yellow]Skipping llm and full-llm modes because OPENROUTER_API_KEY is missing.[/yellow]")
+
+    return modes
 
 
 def aggregate_metrics(results: list[ScenarioResult]) -> dict:
     total = len(results)
     passed = sum(result.passed for result in results)
 
+    by_mode: dict[str, dict[str, int | float]] = {}
     by_category: dict[str, dict[str, int | float]] = {}
 
     for result in results:
-        category = result.category
-        by_category.setdefault(category, {"total": 0, "passed": 0, "success_rate": 0.0})
-        by_category[category]["total"] += 1
+        by_mode.setdefault(
+            result.mode,
+            {
+                "total": 0,
+                "passed": 0,
+                "first_attempt_passed": 0,
+                "attempts_total": 0,
+                "wall_time_seconds": 0.0,
+                "success_rate": 0.0,
+                "first_attempt_success_rate": 0.0,
+                "average_attempts": 0.0,
+                "average_wall_time_seconds": 0.0,
+            },
+        )
+
+        by_mode[result.mode]["total"] += 1
+        by_mode[result.mode]["attempts_total"] += result.attempts_used
+        by_mode[result.mode]["wall_time_seconds"] += result.wall_time_seconds
 
         if result.passed:
-            by_category[category]["passed"] += 1
+            by_mode[result.mode]["passed"] += 1
+
+        if result.first_attempt_passed:
+            by_mode[result.mode]["first_attempt_passed"] += 1
+
+        category_key = f"{result.mode}:{result.category}"
+        by_category.setdefault(category_key, {"total": 0, "passed": 0, "success_rate": 0.0})
+        by_category[category_key]["total"] += 1
+
+        if result.passed:
+            by_category[category_key]["passed"] += 1
+
+    for stats in by_mode.values():
+        stats["success_rate"] = stats["passed"] / stats["total"] if stats["total"] else 0.0
+        stats["first_attempt_success_rate"] = stats["first_attempt_passed"] / stats["total"] if stats["total"] else 0.0
+        stats["average_attempts"] = stats["attempts_total"] / stats["total"] if stats["total"] else 0.0
+        stats["average_wall_time_seconds"] = stats["wall_time_seconds"] / stats["total"] if stats["total"] else 0.0
 
     for stats in by_category.values():
         stats["success_rate"] = stats["passed"] / stats["total"] if stats["total"] else 0.0
@@ -782,24 +883,23 @@ def aggregate_metrics(results: list[ScenarioResult]) -> dict:
 
         return sum(int(result.metrics.get(metric_name, 0)) for result in eligible) / len(eligible)
 
-    total_turns = sum(result.turns for result in results)
-    total_lookup_calls = sum(result.lookup_calls for result in results)
-    total_payment_calls = sum(result.payment_calls for result in results)
-    privacy_leak_count = sum(int(result.metrics.get("privacy_leak_count", 0)) for result in results)
-    premature_payment_calls = sum(int(result.metrics.get("premature_payment_calls", 0)) for result in results)
+    total_wall_time = sum(result.wall_time_seconds for result in results)
 
     return {
-        "total_scenarios": total,
-        "passed_scenarios": passed,
-        "failed_scenarios": total - passed,
-        "scenario_success_rate": passed / total if total else 0.0,
+        "total_runs": total,
+        "passed_runs": passed,
+        "failed_runs": total - passed,
+        "run_success_rate": passed / total if total else 0.0,
+        "by_mode": by_mode,
         "category_success_rates": by_category,
-        "total_turns": total_turns,
-        "average_turns_per_scenario": total_turns / total if total else 0.0,
-        "total_lookup_calls": total_lookup_calls,
-        "total_payment_calls": total_payment_calls,
-        "privacy_leak_count": privacy_leak_count,
-        "premature_payment_calls": premature_payment_calls,
+        "total_wall_time_seconds": total_wall_time,
+        "average_wall_time_seconds": total_wall_time / total if total else 0.0,
+        "total_turns": sum(result.turns for result in results),
+        "average_turns_per_run": sum(result.turns for result in results) / total if total else 0.0,
+        "total_lookup_calls": sum(result.lookup_calls for result in results),
+        "total_payment_calls": sum(result.payment_calls for result in results),
+        "privacy_leak_count": sum(int(result.metrics.get("privacy_leak_count", 0)) for result in results),
+        "premature_payment_calls": sum(int(result.metrics.get("premature_payment_calls", 0)) for result in results),
         "interface_compliance_rate": rate("response_shape_ok"),
         "clear_error_message_rate": rate("clear_error_message"),
         "graceful_close_rate": rate("graceful_close"),
@@ -812,27 +912,67 @@ def aggregate_metrics(results: list[ScenarioResult]) -> dict:
 
 
 def print_summary(results: list[ScenarioResult], metrics: dict) -> None:
-    scenario_table = Table(title="SettleSentry Evaluation")
+    mode_table = Table(title="Mode Performance Summary")
+    mode_table.add_column("Mode", style="cyan")
+    mode_table.add_column("Passed/Total", style="white")
+    mode_table.add_column("Success", style="white")
+    mode_table.add_column("First Attempt", style="white")
+    mode_table.add_column("Avg Attempts", style="white")
+    mode_table.add_column("Wall Time", style="white")
+    mode_table.add_column("Avg/Run", style="white")
+
+    for mode, stats in metrics["by_mode"].items():
+        mode_table.add_row(
+            mode,
+            f"{stats['passed']}/{stats['total']}",
+            f"{stats['success_rate']:.2%}",
+            f"{stats['first_attempt_success_rate']:.2%}",
+            f"{stats['average_attempts']:.2f}",
+            f"{stats['wall_time_seconds']:.2f}s",
+            f"{stats['average_wall_time_seconds']:.2f}s",
+        )
+
+    CONSOLE.print(mode_table)
+
+    scenario_table = Table(title="Scenario Results")
     scenario_table.add_column("Status", justify="center")
+    scenario_table.add_column("Mode", style="cyan")
     scenario_table.add_column("Category", style="cyan")
     scenario_table.add_column("Scenario", style="white")
+    scenario_table.add_column("Repeat", justify="right")
+    scenario_table.add_column("Attempts", justify="right")
+    scenario_table.add_column("Wall Time", justify="right")
     scenario_table.add_column("Reason", style="magenta")
+
     for result in results:
         status = "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]"
-        scenario_table.add_row(status, result.category, result.name, result.reason)
+        scenario_table.add_row(
+            status,
+            result.mode,
+            result.category,
+            result.name,
+            str(result.repeat_index),
+            str(result.attempts_used),
+            f"{result.wall_time_seconds:.2f}s",
+            result.reason,
+        )
+
     CONSOLE.print(scenario_table)
 
-    metrics_table = Table(title="Metrics")
+    metrics_table = Table(title="Overall Metrics")
     metrics_table.add_column("Metric", style="cyan")
     metrics_table.add_column("Value", style="white")
-    metrics_table.add_row("scenario_success_rate", f"{metrics['scenario_success_rate']:.2%}")
-    metrics_table.add_row("passed_scenarios", f"{metrics['passed_scenarios']}/{metrics['total_scenarios']}")
+
+    metrics_table.add_row("run_success_rate", f"{metrics['run_success_rate']:.2%}")
+    metrics_table.add_row("passed_runs", f"{metrics['passed_runs']}/{metrics['total_runs']}")
+    metrics_table.add_row("total_wall_time_seconds", f"{metrics['total_wall_time_seconds']:.2f}s")
+    metrics_table.add_row("average_wall_time_seconds", f"{metrics['average_wall_time_seconds']:.2f}s")
     metrics_table.add_row("interface_compliance_rate", f"{metrics['interface_compliance_rate']:.2%}")
     metrics_table.add_row("privacy_leak_count", str(metrics["privacy_leak_count"]))
     metrics_table.add_row("premature_payment_calls", str(metrics["premature_payment_calls"]))
     metrics_table.add_row("total_lookup_calls", str(metrics["total_lookup_calls"]))
     metrics_table.add_row("total_payment_calls", str(metrics["total_payment_calls"]))
-    metrics_table.add_row("average_turns_per_scenario", f"{metrics['average_turns_per_scenario']:.2f}")
+    metrics_table.add_row("average_turns_per_run", f"{metrics['average_turns_per_run']:.2f}")
     metrics_table.add_row("clear_error_message_rate", f"{metrics['clear_error_message_rate']:.2%}")
     metrics_table.add_row("graceful_close_rate", f"{metrics['graceful_close_rate']:.2%}")
     metrics_table.add_row("amount_guardrail_success_rate", f"{metrics['amount_guardrail_success_rate']:.2%}")
@@ -840,15 +980,8 @@ def print_summary(results: list[ScenarioResult], metrics: dict) -> None:
     metrics_table.add_row("recovery_success_rate", f"{metrics['recovery_success_rate']:.2%}")
     metrics_table.add_row("payment_recovery_success_rate", f"{metrics['payment_recovery_success_rate']:.2%}")
     metrics_table.add_row("confirmation_gate_success_rate", f"{metrics['confirmation_gate_success_rate']:.2%}")
-    CONSOLE.print(metrics_table)
 
-    category_table = Table(title="Category Success Rates")
-    category_table.add_column("Category", style="cyan")
-    category_table.add_column("Passed/Total", style="white")
-    category_table.add_column("Rate", style="white")
-    for category, stats in metrics["category_success_rates"].items():
-        category_table.add_row(category, f"{stats['passed']}/{stats['total']}", f"{stats['success_rate']:.2%}")
-    CONSOLE.print(category_table)
+    CONSOLE.print(metrics_table)
 
 
 def write_report(results: list[ScenarioResult], metrics: dict) -> Path:
@@ -874,17 +1007,61 @@ def write_report(results: list[ScenarioResult], metrics: dict) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run scenario-based SettleSentry evaluation.")
     parser.add_argument(
-        "--json-only",
-        action="store_true",
-        help="Only write JSON report, do not print full console summary.",
+        "--all",
+        action=BooleanOptionalAction,
+        default=True,
+        help="Run all available modes. Enabled by default. Use --no-all with --mode for a single mode.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--mode",
+        choices=["local", "llm", "full-llm"],
+        default="local",
+        help="Single mode to evaluate when --no-all is used.",
+    )
+    parser.add_argument("--repeats", type=int, default=1, help="Repeats for local mode.")
+    parser.add_argument("--llm-repeats", type=int, default=1, help="Repeats for llm and full-llm modes.")
+    parser.add_argument(
+        "--scenario-retries",
+        type=int,
+        default=2,
+        help="Retry attempts per scenario run. Retries are visible in the report.",
+    )
+    parser.add_argument("--json-only", action="store_true", help="Only write JSON report.")
+
+    args = parser.parse_args()
+
+    if args.repeats < 1:
+        raise SystemExit("--repeats must be >= 1")
+
+    if args.llm_repeats < 1:
+        raise SystemExit("--llm-repeats must be >= 1")
+
+    if args.scenario_retries < 1:
+        raise SystemExit("--scenario-retries must be >= 1")
+
+    return args
 
 
 def main() -> None:
     args = parse_args()
+    modes = resolve_modes(run_all=args.all, requested_mode=args.mode)
 
-    results = [run_scenario(scenario) for scenario in SCENARIOS]
+    results: list[ScenarioResult] = []
+
+    for mode in modes:
+        repeats = args.llm_repeats if mode in {EvalMode.LLM, EvalMode.FULL_LLM} else args.repeats
+
+        for repeat_index in range(1, repeats + 1):
+            for scenario in SCENARIOS:
+                results.append(
+                    run_scenario_with_retries(
+                        scenario=scenario,
+                        mode=mode,
+                        repeat_index=repeat_index,
+                        max_attempts=args.scenario_retries,
+                    )
+                )
+
     metrics = aggregate_metrics(results)
     report_path = write_report(results, metrics)
 
@@ -893,11 +1070,7 @@ def main() -> None:
         print(f"\nWrote report: {report_path}")
 
     failed = [result for result in results if not result.passed]
-
-    if failed:
-        raise SystemExit(1)
-
-    raise SystemExit(0)
+    raise SystemExit(1 if failed else 0)
 
 
 if __name__ == "__main__":
