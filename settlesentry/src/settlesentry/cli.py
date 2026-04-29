@@ -18,16 +18,14 @@ console = Console()
 
 
 class AgentMode(StrEnum):
-    DETERMINISTIC = "deterministic"
+    LOCAL = "local"
     LLM = "llm"
+    FULL_LLM = "full-llm"
 
 
 def configure_console_logging(debug_logs: bool) -> None:
     """
     Configure console logging before importing agent modules.
-
-    settings are loaded when settlesentry modules are imported, so this must run
-    before importing Agent/get_logger/settings.
     """
     os.environ["LOG_CONSOLE_ENABLED"] = "true" if debug_logs else "false"
 
@@ -35,13 +33,19 @@ def configure_console_logging(debug_logs: bool) -> None:
 def build_agent(mode: AgentMode):
     """
     Build an Agent lazily after logging env has been configured.
+
+    Modes:
+    - local: deterministic parser + deterministic responder
+    - llm: LLM parser + deterministic responder
+    - full-llm: LLM parser + LLM responder
     """
     from settlesentry.agent.agent import Agent
+    from settlesentry.agent.parser import build_input_parser
     from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-    from settlesentry.agent.responder import DeterministicResponseGenerator
+    from settlesentry.agent.responder import DeterministicResponseGenerator, build_response_generator
     from settlesentry.core import settings
 
-    if mode == AgentMode.DETERMINISTIC:
+    if mode == AgentMode.LOCAL:
         return Agent(
             parser=DeterministicInputParser(),
             responder=DeterministicResponseGenerator(),
@@ -50,11 +54,21 @@ def build_agent(mode: AgentMode):
 
     if not settings.llm.api_key:
         raise RuntimeError(
-            "OPENROUTER_API_KEY is missing. "
-            "Use --mode deterministic or set OPENROUTER_API_KEY in your environment/.env file."
+            "OPENROUTER_API_KEY is missing. Use --mode local or set OPENROUTER_API_KEY in your environment/.env file."
         )
 
-    return Agent(grouped_card_collection=True)
+    if mode == AgentMode.LLM:
+        return Agent(
+            parser=build_input_parser(),
+            responder=DeterministicResponseGenerator(),
+            grouped_card_collection=True,
+        )
+
+    return Agent(
+        parser=build_input_parser(),
+        responder=build_response_generator(),
+        grouped_card_collection=True,
+    )
 
 
 def validate_agent_response(response: dict) -> str:
@@ -76,16 +90,17 @@ def validate_agent_response(response: dict) -> str:
 
 
 def print_header(mode: AgentMode, debug_logs: bool) -> None:
-    if mode == AgentMode.LLM:
-        description = "LLM/OpenRouter mode with grouped card-detail parsing."
-    else:
-        description = "Deterministic mode with sequential card-detail collection."
+    descriptions = {
+        AgentMode.LOCAL: "Local mode: deterministic parser and deterministic responses.",
+        AgentMode.LLM: "LLM mode: LLM parser with deterministic responses.",
+        AgentMode.FULL_LLM: "Full LLM mode: LLM parser and LLM-written responses.",
+    }
 
     logging_text = "console logs enabled" if debug_logs else "console logs disabled"
 
     console.print(
         Panel.fit(
-            f"[bold]SettleSentry Payment Collection Agent[/bold]\n{description}\n[dim]{logging_text}[/dim]",
+            f"[bold]SettleSentry Payment Collection Agent[/bold]\n{descriptions[mode]}\n[dim]{logging_text}[/dim]",
             border_style="blue",
         )
     )
@@ -97,9 +112,6 @@ def run_chat(
     show_state: bool,
     debug_logs: bool,
 ) -> None:
-    """
-    Shared interactive runner used by both `settlesentry` and `settlesentry chat`.
-    """
     configure_console_logging(debug_logs)
 
     try:
@@ -145,7 +157,7 @@ def main(
         typer.Option(
             "--mode",
             "-m",
-            help="Agent mode. llm uses configured OpenRouter settings; deterministic is local/stable fallback.",
+            help="Agent mode: local, llm, or full-llm.",
         ),
     ] = AgentMode.LLM,
     show_state: Annotated[
@@ -181,7 +193,7 @@ def chat(
         typer.Option(
             "--mode",
             "-m",
-            help="Agent mode. llm uses configured OpenRouter settings; deterministic is local/stable fallback.",
+            help="Agent mode: local, llm, or full-llm.",
         ),
     ] = AgentMode.LLM,
     show_state: Annotated[
