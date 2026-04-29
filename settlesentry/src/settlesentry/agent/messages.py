@@ -30,6 +30,7 @@ FIELD_LABELS = {
 }
 
 DETERMINISTIC_STATUSES = {
+    "greeting",
     "verification_exhausted",
     "zero_balance",
     "payment_success",
