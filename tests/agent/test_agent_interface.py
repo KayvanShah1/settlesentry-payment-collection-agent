@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic_ai.exceptions import UsageLimitExceeded
 from settlesentry.agent.agent import Agent
+from settlesentry.agent.parsers.deterministic import DeterministicInputParser
+from settlesentry.agent.responder import DeterministicResponseGenerator
 from settlesentry.agent.state import ConversationStep
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,
@@ -35,123 +36,59 @@ class FakePaymentsClient:
         )
 
 
-class FakeAgentResult:
-    def __init__(self, output: str):
-        self.output = output
-
-    def all_messages(self):
-        return ["message-1", "message-2"]
-
-
-class FakePydanticAgent:
-    def __init__(self):
-        self.calls = []
-
-    def run_sync(self, user_input: str, *, deps, message_history, **kwargs):
-        self.calls.append(
-            {
-                "user_input": user_input,
-                "deps": deps,
-                "message_history": message_history,
-            }
-        )
-        return FakeAgentResult("Hello! Please share your account ID to get started.")
-
-
-class FakeJSONOutputAgent(FakePydanticAgent):
-    def run_sync(self, user_input: str, *, deps, message_history, **kwargs):
-        self.calls.append(
-            {
-                "user_input": user_input,
-                "deps": deps,
-                "message_history": message_history,
-            }
-        )
-        return FakeAgentResult('{"message":"Hello! Please share your account ID to get started."}')
-
-
-class UsageLimitAgent:
-    def run_sync(self, user_input: str, *, deps, message_history, **kwargs):
-        raise UsageLimitExceeded("request limit exceeded")
-
-
-class ShouldNotRunAgent:
-    def run_sync(self, user_input: str, *, deps, message_history, **kwargs):
-        raise AssertionError("run_sync should not be called")
+def make_agent() -> Agent:
+    return Agent(
+        payments_client=FakePaymentsClient(),
+        parser=DeterministicInputParser(),
+        responder=DeterministicResponseGenerator(),
+        grouped_card_collection=False,
+    )
 
 
 def test_agent_next_returns_required_assignment_shape():
-    fake_agent = FakePydanticAgent()
-    agent = Agent(
-        payments_client=FakePaymentsClient(),
-        pydantic_agent=fake_agent,
-    )
+    agent = make_agent()
 
     response = agent.next("Hi")
 
-    assert response == {
-        "message": "Hello! Please share your account ID to get started.",
-    }
-
-
-def test_agent_next_unwraps_json_message_string():
-    fake_agent = FakeJSONOutputAgent()
-    agent = Agent(
-        payments_client=FakePaymentsClient(),
-        pydantic_agent=fake_agent,
-    )
-
-    response = agent.next("Hi")
-
-    assert response == {
-        "message": "Hello! Please share your account ID to get started.",
-    }
-
-
-def test_agent_preserves_message_history_between_turns():
-    fake_agent = FakePydanticAgent()
-    agent = Agent(
-        payments_client=FakePaymentsClient(),
-        pydantic_agent=fake_agent,
-    )
-
-    agent.next("Hi")
-    agent.next("ACC1001")
-
-    assert fake_agent.calls[0]["message_history"] == []
-    assert fake_agent.calls[1]["message_history"] == ["message-1", "message-2"]
+    assert isinstance(response, dict)
+    assert set(response.keys()) == {"message"}
+    assert isinstance(response["message"], str)
+    assert "account" in response["message"].lower()
 
 
 def test_agent_keeps_state_inside_single_instance():
-    fake_agent = FakePydanticAgent()
-    agent = Agent(
-        payments_client=FakePaymentsClient(),
-        pydantic_agent=fake_agent,
-    )
+    agent = make_agent()
 
     assert agent.state.account_id is None
     assert agent.session_id
 
 
-def test_agent_uses_state_fallback_message_when_usage_limit_is_hit():
-    agent = Agent(
-        payments_client=FakePaymentsClient(),
-        pydantic_agent=UsageLimitAgent(),
-    )
-    agent.state.step = ConversationStep.WAITING_FOR_FULL_NAME
+def test_agent_can_progress_from_greeting_to_account_lookup():
+    agent = make_agent()
 
-    response = agent.next("1987-09-21")
+    agent.next("Hi")
+    response = agent.next("ACC1001")
 
-    assert "full name" in response["message"].lower()
+    assert agent.state.account_id == "ACC1001"
+    assert agent.state.has_account_loaded() is True
     assert agent.state.step == ConversationStep.WAITING_FOR_FULL_NAME
-    assert agent.state.completed is False
+    assert "full name" in response["message"].lower()
+
+
+def test_agent_handles_side_question_without_losing_state():
+    agent = make_agent()
+
+    agent.next("Hi")
+    response = agent.next("who are you?")
+
+    assert agent.state.account_id is None
+    assert agent.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID
+    assert "settlesentry" in response["message"].lower()
+    assert "account" in response["message"].lower()
 
 
 def test_agent_closes_deterministically_when_already_in_payment_success():
-    agent = Agent(
-        payments_client=FakePaymentsClient(),
-        pydantic_agent=ShouldNotRunAgent(),
-    )
+    agent = make_agent()
     agent.state.step = ConversationStep.PAYMENT_SUCCESS
     agent.state.payment_amount = Decimal("400.00")
     agent.state.transaction_id = "txn_123"
@@ -162,3 +99,22 @@ def test_agent_closes_deterministically_when_already_in_payment_success():
     assert "INR 400.00" in response["message"]
     assert agent.state.completed is True
     assert agent.state.step == ConversationStep.CLOSED
+
+
+def test_agent_happy_path_processes_payment():
+    agent = make_agent()
+
+    agent.next("Hi")
+    agent.next("ACC1001")
+    agent.next("Nithin Jain")
+    agent.next("1990-05-14")
+    agent.next("500")
+    agent.next("Nithin Jain")
+    agent.next("4532 0151 1283 0366")
+    agent.next("12/2027")
+    agent.next("123")
+    response = agent.next("yes")
+
+    assert agent.state.completed is True
+    assert agent.state.transaction_id == "txn_123"
+    assert "Transaction ID: txn_123" in response["message"]

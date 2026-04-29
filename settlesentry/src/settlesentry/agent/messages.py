@@ -1,0 +1,226 @@
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from settlesentry.agent.state import SafeConversationState
+
+
+class ResponseContext(BaseModel):
+    status: str
+    required_fields: tuple[str, ...] = ()
+    facts: dict[str, Any] = Field(default_factory=dict)
+    safe_state: SafeConversationState
+
+
+FIELD_LABELS = {
+    "account_id": "account ID in ACC<digits> format, for example ACC1001",
+    "full_name": "full name exactly as registered on the account",
+    "dob_or_aadhaar_last4_or_pincode": (
+        "one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode"
+    ),
+    "payment_amount": "payment amount in INR",
+    "cardholder_name": "cardholder name",
+    "card_number": "full card number",
+    "expiry": "expiry in MM/YYYY format",
+    "cvv": "CVV",
+    "confirmation": "confirmation by replying yes or no",
+}
+
+DETERMINISTIC_STATUSES = {
+    "verification_exhausted",
+    "zero_balance",
+    "payment_success",
+    "conversation_closed",
+    "cancelled",
+    "payment_attempts_exhausted",
+}
+
+
+def build_fallback_response(context: ResponseContext) -> str:
+    status = context.status
+
+    if status == "greeting":
+        return (
+            "Hello, I’m SettleSentry, your payment collection assistant. "
+            "I’ll help you verify your account and make a payment step by step. "
+            "Please share your account ID."
+        )
+
+    if status == "ask_agent_identity":
+        return append_pending_question(
+            "I’m SettleSentry, a payment collection assistant.",
+            context,
+        )
+
+    if status == "ask_agent_capability":
+        return append_pending_question(
+            (
+                "I’ll help you verify your account, show the outstanding balance, collect payment details, "
+                "ask for confirmation, and process the payment only after you confirm."
+            ),
+            context,
+        )
+
+    if status == "ask_current_status":
+        return append_pending_question(build_status_summary(context), context)
+
+    if status == "ask_to_repeat":
+        return pending_question(context)
+
+    if status == "correction_requested":
+        return (
+            "Sure. Which detail would you like to correct: account ID, full name, verification factor, "
+            "payment amount, or card details?"
+        )
+
+    if status == "correction_applied":
+        pending = pending_question(context)
+        return f"Updated. {pending}" if pending else "Updated."
+
+    if status in {"input_captured", "invalid_user_input"}:
+        return pending_question(context)
+
+    if status == "account_loaded":
+        return "Account found. Please share your full name exactly as registered on the account."
+
+    if status in {"account_not_found", "account_lookup_failed"}:
+        return "I could not find an account for that account ID. Please share a valid account ID in ACC<digits> format."
+
+    if status == "identity_verified":
+        balance = context.facts.get("balance")
+        return f"Identity verified. Your outstanding balance is {format_amount_from_text(balance)}. Please share the payment amount in INR."
+
+    if status == "identity_verification_failed":
+        return "I could not verify those details. Please share your full name exactly as registered on the account."
+
+    if status == "verification_exhausted":
+        return (
+            "I’m unable to verify your identity after multiple attempts, so I can’t continue with payment collection "
+            "in this chat. No payment has been processed."
+        )
+
+    if status == "zero_balance":
+        return "Identity verified. This account has no outstanding balance, so no payment is due. This conversation is now closed."
+
+    if status == "payment_ready_for_confirmation":
+        amount = format_amount_from_text(context.facts.get("amount"))
+        card_last4 = context.facts.get("card_last4") or "the provided card"
+        return (
+            f"Payment of {amount} using card ending {card_last4} is ready. Please reply yes to confirm or no to cancel."
+        )
+
+    if status == "payment_not_confirmed":
+        return "Payment has not been confirmed. Please reply yes to confirm or no to cancel."
+
+    if status == "payment_success":
+        transaction_id = context.facts.get("transaction_id") or context.safe_state.transaction_id or "not available"
+        amount = format_amount_from_text(context.facts.get("amount") or context.safe_state.payment_amount)
+        return f"Payment of {amount} was processed successfully. Transaction ID: {transaction_id}. This conversation is now closed."
+
+    if status == "conversation_closed":
+        transaction_id = context.facts.get("transaction_id") or context.safe_state.transaction_id
+
+        if transaction_id:
+            amount = format_amount_from_text(context.facts.get("payment_amount") or context.safe_state.payment_amount)
+            return f"Payment of {amount} was processed successfully. Transaction ID: {transaction_id}. This conversation is now closed."
+
+        return "This conversation is now closed. No payment has been processed."
+
+    if status == "cancelled":
+        return "Payment flow cancelled. No payment has been processed. This conversation is now closed."
+
+    if status in {"invalid_card", "invalid_cvv", "invalid_expiry", "payment_failed", "missing_card_fields"}:
+        return pending_question(context)
+
+    if context.required_fields:
+        return pending_question(context)
+
+    return "Please provide the requested detail to continue."
+
+
+def pending_question(context: ResponseContext) -> str:
+    fields = context.required_fields
+
+    if not fields:
+        return "Please provide the requested detail to continue."
+
+    card_group = [field for field in fields if field in {"cardholder_name", "card_number", "expiry"}]
+
+    if len(card_group) > 1:
+        labels = [FIELD_LABELS[field] for field in card_group]
+        return f"Please share the {join_labels(labels)}."
+
+    first = fields[0]
+
+    if first == "confirmation":
+        amount = format_amount_from_text(context.safe_state.payment_amount)
+        return f"Please confirm the payment of {amount} by replying yes or no."
+
+    label = FIELD_LABELS.get(first, "requested detail")
+    return f"Please share your {label}."
+
+
+def append_pending_question(answer: str, context: ResponseContext) -> str:
+    question = pending_question(context)
+
+    if not question:
+        return answer
+
+    return f"{answer} {question}"
+
+
+def build_status_summary(context: ResponseContext) -> str:
+    state = context.safe_state
+
+    if state.completed:
+        return "This conversation is already closed."
+
+    if not state.account_id:
+        return "We have not started verification yet."
+
+    if state.account_id and not state.account_loaded:
+        return "I have your account ID and need to look up the account."
+
+    if state.account_loaded and not state.verified:
+        return "The account has been found, and identity verification is still pending."
+
+    if state.verified and state.payment_amount is None:
+        return "Identity is verified, and payment amount is pending."
+
+    if state.payment_amount and not state.payment_confirmed:
+        return "Payment details are being collected or awaiting confirmation."
+
+    return "The payment flow is in progress."
+
+
+def format_amount(value: Decimal | None) -> str:
+    if value is None:
+        return "the selected amount"
+
+    return f"INR {value:.2f}"
+
+
+def format_amount_from_text(value: object) -> str:
+    if value in (None, ""):
+        return "the selected amount"
+
+    try:
+        return format_amount(Decimal(str(value)))
+    except Exception:
+        return f"INR {value}"
+
+
+def join_labels(labels: list[str]) -> str:
+    if not labels:
+        return "requested details"
+
+    if len(labels) == 1:
+        return labels[0]
+
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+
+    return f"{', '.join(labels[:-1])}, and {labels[-1]}"

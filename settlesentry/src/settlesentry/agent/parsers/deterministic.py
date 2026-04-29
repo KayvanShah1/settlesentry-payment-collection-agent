@@ -74,7 +74,8 @@ class ParserPatterns:
 
     CARDHOLDER: Pattern[str] = re.compile(
         r"(?i)\b(?:cardholder|card\s+holder|name\s+on\s+card)\s*(?:name)?\s*(?:is|:|=)?\s*"
-        r"(?P<cardholder_name>[A-Za-z][A-Za-z\s.'-]{1,80})"
+        r"(?P<cardholder_name>[A-Za-z][A-Za-z\s.'-]{1,80}?)"
+        r"(?=\s+(?:and\s+)?(?:card(?:\s+number|_number)?|credit\s+card|debit\s+card|cvv|cvc|expiry|exp|valid\s+till|amount|payment|pay)\b|$)"
     )
 
     FULL_NAME: Pattern[str] = re.compile(
@@ -86,7 +87,28 @@ class ParserPatterns:
     CONFIRM: Pattern[str] = re.compile(
         r"(?i)\b(?:yes|yeah|yep|confirm|confirmed|go\s+ahead|proceed|process\s+it|make\s+the\s+payment)\b"
     )
-    CANCEL: Pattern[str] = re.compile(r"(?i)\b(?:cancel|stop|exit|quit|never\s+mind|nevermind)\b")
+
+    CANCEL: Pattern[str] = re.compile(
+        r"(?i)\b(?:cancel|stop|exit|quit|never\s+mind|nevermind|do\s+not\s+proceed|don't\s+proceed)\b"
+    )
+
+    NEGATIVE_CONFIRMATION: Pattern[str] = re.compile(r"(?i)\b(?:no|cancel|stop|do\s+not\s+proceed|don't\s+proceed)\b")
+
+    ASK_AGENT_IDENTITY: Pattern[str] = re.compile(
+        r"(?i)\b(?:who\s+are\s+you|what\s+are\s+you|are\s+you\s+(?:a\s+)?bot|your\s+name)\b"
+    )
+    ASK_AGENT_CAPABILITY: Pattern[str] = re.compile(
+        r"(?i)\b(?:what\s+will\s+you\s+do|what\s+can\s+you\s+do|how\s+does\s+this\s+work|help\s+me\s+with)\b"
+    )
+    ASK_TO_REPEAT: Pattern[str] = re.compile(
+        r"(?i)\b(?:repeat|restate|say\s+that\s+again|what\s+did\s+you\s+ask|what\s+do\s+you\s+need)\b"
+    )
+    ASK_CURRENT_STATUS: Pattern[str] = re.compile(
+        r"(?i)\b(?:where\s+are\s+we|current\s+status|status|what\s+is\s+pending|what\s+is\s+left)\b"
+    )
+    CORRECTION: Pattern[str] = re.compile(
+        r"(?i)\b(?:correct|correction|change|update|actually|mistake|wrong|typo|edit)\b"
+    )
 
 
 EXPECTED_FIELD_OUTPUT_KEYS: dict[ExpectedField, tuple[str, ...]] = {
@@ -124,11 +146,13 @@ class DeterministicInputParser:
 
         extracted: dict[str, object] = {}
 
-        self._extract_cancel(text, extracted)
+        self._extract_cancel(text, context, extracted)
 
         if extracted.get("intent") == UserIntent.CANCEL:
             return self._safe_model_validate(extracted)
 
+        self._extract_side_intents(text, extracted)
+        self._extract_correction_intent(text, extracted)
         self._extract_labeled_fields(text, extracted)
         self._extract_expected_slots(text, context, extracted)
         self._extract_confirmation(text, context, extracted)
@@ -136,10 +160,42 @@ class DeterministicInputParser:
 
         return self._safe_model_validate(extracted)
 
-    def _extract_cancel(self, text: str, extracted: dict[str, object]) -> None:
+    def _extract_cancel(
+        self,
+        text: str,
+        context: ParserContext | None,
+        extracted: dict[str, object],
+    ) -> None:
         if ParserPatterns.CANCEL.search(text):
             extracted["intent"] = UserIntent.CANCEL
             extracted["proposed_action"] = ProposedAction.CANCEL
+            return
+
+        confirmation_expected = context is not None and "confirmation" in context.expected_fields
+        if confirmation_expected and ParserPatterns.NEGATIVE_CONFIRMATION.search(text):
+            extracted["intent"] = UserIntent.CANCEL
+            extracted["proposed_action"] = ProposedAction.CANCEL
+
+    def _extract_side_intents(self, text: str, extracted: dict[str, object]) -> None:
+        if ParserPatterns.ASK_AGENT_IDENTITY.search(text):
+            extracted["intent"] = UserIntent.ASK_AGENT_IDENTITY
+            return
+
+        if ParserPatterns.ASK_AGENT_CAPABILITY.search(text):
+            extracted["intent"] = UserIntent.ASK_AGENT_CAPABILITY
+            return
+
+        if ParserPatterns.ASK_TO_REPEAT.search(text):
+            extracted["intent"] = UserIntent.ASK_TO_REPEAT
+            return
+
+        if ParserPatterns.ASK_CURRENT_STATUS.search(text):
+            extracted["intent"] = UserIntent.ASK_CURRENT_STATUS
+
+    def _extract_correction_intent(self, text: str, extracted: dict[str, object]) -> None:
+        if ParserPatterns.CORRECTION.search(text):
+            extracted["intent"] = UserIntent.CORRECT_PREVIOUS_DETAIL
+            extracted["proposed_action"] = ProposedAction.HANDLE_CORRECTION
 
     def _extract_confirmation(
         self,
@@ -147,7 +203,15 @@ class DeterministicInputParser:
         context: ParserContext | None,
         extracted: dict[str, object],
     ) -> None:
+        if extracted.get("intent") == UserIntent.CANCEL:
+            return
+
         confirmation_expected = context is not None and "confirmation" in context.expected_fields
+
+        if confirmation_expected and ParserPatterns.NEGATIVE_CONFIRMATION.search(text):
+            extracted["intent"] = UserIntent.CANCEL
+            extracted["proposed_action"] = ProposedAction.CANCEL
+            return
 
         if confirmation_expected and ParserPatterns.CONFIRM.search(text):
             extracted["confirmation"] = True
@@ -266,7 +330,11 @@ class DeterministicInputParser:
 
     @staticmethod
     def _infer_intent_and_action(extracted: dict[str, object]) -> None:
-        if extracted.get("intent"):
+        if extracted.get("intent") and extracted.get("intent") != UserIntent.CORRECT_PREVIOUS_DETAIL:
+            return
+
+        if extracted.get("intent") == UserIntent.CORRECT_PREVIOUS_DETAIL:
+            extracted["proposed_action"] = ProposedAction.HANDLE_CORRECTION
             return
 
         if "account_id" in extracted:
@@ -305,6 +373,7 @@ class DeterministicInputParser:
         cleaned = value.strip(" .,'-\n\t")
 
         stop_words = (
+            " and ",
             " dob ",
             " date of birth ",
             " aadhaar ",
@@ -326,6 +395,14 @@ class DeterministicInputParser:
 
         if cut_positions:
             cleaned = cleaned[: min(cut_positions)].strip(" .,'-\n\t")
+
+        trailing_connectors = (" and", " with", " plus")
+        lowered_cleaned = cleaned.lower()
+
+        for connector in trailing_connectors:
+            if lowered_cleaned.endswith(connector):
+                cleaned = cleaned[: -len(connector)].strip(" .,'-\n\t")
+                break
 
         return " ".join(cleaned.split())
 
