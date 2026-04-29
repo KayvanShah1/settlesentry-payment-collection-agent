@@ -133,7 +133,13 @@ def build_fallback_response(context: ResponseContext) -> str:
         )
 
     if status == "identity_verification_failed":
-        return "I could not verify those details. Please share your full name exactly as registered on the account."
+        attempts_remaining = context.facts.get("attempts_remaining")
+        retry_note = ""
+
+        if attempts_remaining is not None:
+            retry_note = f" You have {attempts_remaining} verification attempt{'s' if attempts_remaining != 1 else ''} remaining."
+
+        return f"I could not verify those details.{retry_note} {pending_question(context)}"
 
     if status == "verification_exhausted":
         return (
