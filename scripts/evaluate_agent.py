@@ -804,6 +804,41 @@ SCENARIOS = [
     ),
 ]
 
+LLM_CORE_SCENARIOS = {
+    "happy_path_partial_payment",
+    "account_not_found_then_recovery",
+    "amount_exceeds_balance_before_card_collection",
+    "verification_failure_then_recovery",
+    "side_question_preserves_pending_state",
+    "payment_failure_recovery",
+}
+
+FULL_LLM_SMOKE_SCENARIOS = {
+    "happy_path_partial_payment",
+    "side_question_preserves_pending_state",
+    "cancel_at_confirmation_closes_without_payment",
+}
+
+
+def scenarios_for_mode(
+    *,
+    mode: EvalMode,
+    exhaustive: bool,
+) -> list[EvalScenario]:
+    if exhaustive:
+        return SCENARIOS
+
+    if mode == EvalMode.LOCAL:
+        return SCENARIOS
+
+    if mode == EvalMode.LLM:
+        return [scenario for scenario in SCENARIOS if scenario.name in LLM_CORE_SCENARIOS]
+
+    if mode == EvalMode.FULL_LLM:
+        return [scenario for scenario in SCENARIOS if scenario.name in FULL_LLM_SMOKE_SCENARIOS]
+
+    return SCENARIOS
+
 
 def resolve_modes(run_all: bool, requested_mode: str) -> list[EvalMode]:
     if not run_all:
@@ -1023,10 +1058,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--scenario-retries",
         type=int,
-        default=2,
+        default=1,
         help="Retry attempts per scenario run. Retries are visible in the report.",
     )
     parser.add_argument("--json-only", action="store_true", help="Only write JSON report.")
+    parser.add_argument(
+        "--exhaustive",
+        action=BooleanOptionalAction,
+        default=False,
+        help="Run every scenario for every selected mode. Disabled by default to avoid excessive LLM calls.",
+    )
 
     args = parser.parse_args()
 
@@ -1051,8 +1092,13 @@ def main() -> None:
     for mode in modes:
         repeats = args.llm_repeats if mode in {EvalMode.LLM, EvalMode.FULL_LLM} else args.repeats
 
+        mode_scenarios = scenarios_for_mode(
+            mode=mode,
+            exhaustive=args.exhaustive,
+        )
+
         for repeat_index in range(1, repeats + 1):
-            for scenario in SCENARIOS:
+            for scenario in mode_scenarios:
                 results.append(
                     run_scenario_with_retries(
                         scenario=scenario,
