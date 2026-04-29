@@ -397,16 +397,6 @@ VERIFY_IDENTITY_POLICY = PolicySet(
     ),
 )
 
-REVEAL_BALANCE_POLICY = PolicySet(
-    name="reveal_balance",
-    rules=COMMON_VERIFIED_ACCOUNT_RULES,
-)
-
-COLLECT_PAYMENT_POLICY = PolicySet(
-    name="collect_payment",
-    rules=PAYMENT_ELIGIBILITY_RULES,
-)
-
 VALIDATE_PAYMENT_AMOUNT_POLICY = PolicySet(
     name="validate_payment_amount",
     rules=PAYMENT_ELIGIBILITY_RULES + COMMON_PAYMENT_AMOUNT_RULES,

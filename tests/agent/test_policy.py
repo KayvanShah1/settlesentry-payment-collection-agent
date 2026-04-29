@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from settlesentry.agent.policy import (
     PREPARE_PAYMENT_POLICY,
     PROCESS_PAYMENT_POLICY,
-    REVEAL_BALANCE_POLICY,
     PolicyReason,
     identity_matches_account,
     require_payment_attempts_available,
@@ -189,21 +188,6 @@ def test_policy_set_logs_denied_decision_with_reason(
     assert policy_logs[0]["failed_rule"] == "require_complete_card_fields"
 
 
-def test_reveal_balance_denies_when_identity_not_verified():
-    state = ConversationState(
-        account_id="ACC1001",
-        account=make_account(),
-        verified=False,
-    )
-
-    decision = REVEAL_BALANCE_POLICY.evaluate(state)
-    assert_denied(
-        decision,
-        reason=PolicyReason.IDENTITY_NOT_VERIFIED,
-        failed_rule="require_verified_identity",
-    )
-
-
 def test_process_payment_denies_when_not_confirmed_after_valid_request():
     state = ConversationState(
         account_id="ACC1001",
@@ -255,8 +239,19 @@ def test_policy_set_logs_allowed_decision_at_debug(verified_state: ConversationS
     for handler in logger.handlers:
         handler.setLevel(logging.DEBUG)
 
+    state = verified_state.model_copy(
+        update={
+            "cardholder_name": "Nithin Jain",
+            "card_number": "4532015112830366",
+            "cvv": "123",
+            "expiry_month": 12,
+            "expiry_year": 2027,
+            "payment_confirmed": True,
+        }
+    )
+
     try:
-        decision = REVEAL_BALANCE_POLICY.evaluate(verified_state)
+        decision = PROCESS_PAYMENT_POLICY.evaluate(state)
         for handler in logger.handlers:
             handler.flush()
     finally:
@@ -274,6 +269,6 @@ def test_policy_set_logs_allowed_decision_at_debug(verified_state: ConversationS
     assert decision.failed_rule is None
 
     assert "policy_decision" in new_logs
-    assert "policy_name=reveal_balance" in new_logs
+    assert "policy_name=process_payment" in new_logs
     assert "allowed=True" in new_logs
     assert "reason=allowed" in new_logs
