@@ -16,7 +16,6 @@ from settlesentry.agent.nodes import (
     submit_user_input_node,
     verify_identity_node,
 )
-from settlesentry.agent.routing import recommended_node
 from settlesentry.agent.tools.models import AgentToolResult
 
 
@@ -27,46 +26,23 @@ class PaymentGraphState(TypedDict, total=False):
     final_response: str
 
 
-RESPONSE_ONLY_STATUSES = {
-    "greeting",
-    "account_loaded",
-    "account_lookup_failed",
-    "account_not_found",
-    "invalid_user_input",
-    "identity_verified",
-    "identity_verification_failed",
-    "verification_exhausted",
-    "zero_balance",
-    "payment_ready_for_confirmation",
-    "payment_not_confirmed",
-    "payment_attempts_exhausted",
-    "cancelled",
-    "conversation_closed",
-    "ask_agent_identity",
-    "ask_agent_capability",
-    "ask_current_status",
-    "ask_to_repeat",
-    "correction_requested",
-}
-
-
 def route_after_node(graph_state: PaymentGraphState) -> str:
+    """
+    Route only when a node explicitly recommends the next node.
+
+    This prevents policy-blocked states like amount_exceeds_balance from
+    repeatedly re-entering workflow nodes in the same turn.
+    """
     deps = graph_state["deps"]
     result = graph_state.get("last_result")
 
     if deps.state.completed:
         return "respond"
 
-    if result is not None:
-        if result.status in RESPONSE_ONLY_STATUSES:
-            return "respond"
+    if result is not None and result.recommended_tool:
+        return result.recommended_tool
 
-        if result.recommended_tool:
-            return result.recommended_tool
-
-    node = recommended_node(deps)
-
-    return node or "respond"
+    return "respond"
 
 
 def build_payment_graph():

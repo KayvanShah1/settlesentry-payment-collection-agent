@@ -47,7 +47,7 @@ class PolicyDecision(BaseModel):
     message: str | None = None
 
     @classmethod
-    def allow(cls) -> PolicyDecision:
+    def allow(cls) -> "PolicyDecision":
         return cls(
             allowed=True,
             reason=PolicyReason.ALLOWED,
@@ -58,7 +58,7 @@ class PolicyDecision(BaseModel):
         cls,
         reason: PolicyReason,
         message: str | None = None,
-    ) -> PolicyDecision:
+    ) -> "PolicyDecision":
         return cls(
             allowed=False,
             reason=reason,
@@ -100,6 +100,7 @@ class PolicySet:
                 resolved = decision
                 if resolved.failed_rule is None:
                     resolved = resolved.model_copy(update={"failed_rule": rule.name})
+
                 self._log_decision(state, resolved)
                 return resolved
 
@@ -343,7 +344,6 @@ def identity_matches_account(state: ConversationState) -> bool:
     Full name must match exactly, and at least one secondary factor must match
     exactly. Do not use fuzzy matching for this workflow.
     """
-
     if not state.account:
         return False
 
@@ -366,11 +366,14 @@ PAYMENT_ELIGIBILITY_RULES = COMMON_VERIFIED_ACCOUNT_RULES + (
     PolicyRule("require_positive_balance", require_positive_balance),
 )
 
-COMMON_PAYMENT_REQUEST_RULES = (
+COMMON_PAYMENT_AMOUNT_RULES = (
     PolicyRule("require_payment_amount", require_payment_amount),
     PolicyRule("require_amount_within_balance", require_amount_within_balance),
     PolicyRule("require_partial_payment_policy", require_partial_payment_policy),
     PolicyRule("require_amount_within_policy_limit", require_amount_within_policy_limit),
+)
+
+COMMON_PAYMENT_REQUEST_RULES = COMMON_PAYMENT_AMOUNT_RULES + (
     PolicyRule("require_complete_card_fields", require_complete_card_fields),
     PolicyRule("require_valid_payment_request", require_valid_payment_request),
 )
@@ -384,7 +387,6 @@ LOOKUP_ACCOUNT_POLICY = PolicySet(
     ),
 )
 
-
 VERIFY_IDENTITY_POLICY = PolicySet(
     name="verify_identity",
     rules=COMMON_ACCOUNT_CONTEXT_RULES
@@ -395,24 +397,25 @@ VERIFY_IDENTITY_POLICY = PolicySet(
     ),
 )
 
-
 REVEAL_BALANCE_POLICY = PolicySet(
     name="reveal_balance",
     rules=COMMON_VERIFIED_ACCOUNT_RULES,
 )
-
 
 COLLECT_PAYMENT_POLICY = PolicySet(
     name="collect_payment",
     rules=PAYMENT_ELIGIBILITY_RULES,
 )
 
+VALIDATE_PAYMENT_AMOUNT_POLICY = PolicySet(
+    name="validate_payment_amount",
+    rules=PAYMENT_ELIGIBILITY_RULES + COMMON_PAYMENT_AMOUNT_RULES,
+)
 
 PREPARE_PAYMENT_POLICY = PolicySet(
     name="prepare_payment",
     rules=PAYMENT_ELIGIBILITY_RULES + COMMON_PAYMENT_REQUEST_RULES,
 )
-
 
 PROCESS_PAYMENT_POLICY = PolicySet(
     name="process_payment",

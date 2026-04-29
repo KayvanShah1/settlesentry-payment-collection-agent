@@ -80,6 +80,18 @@ def build_fallback_response(context: ResponseContext) -> str:
         pending = pending_question(context)
         return f"Updated. {pending}" if pending else "Updated."
 
+    if status == "amount_exceeds_balance":
+        return "The payment amount cannot exceed the outstanding balance. Please share a lower payment amount in INR."
+
+    if status == "amount_exceeds_policy_limit":
+        return "The payment amount exceeds the configured policy limit. Please share a lower payment amount in INR."
+
+    if status == "invalid_payment_amount":
+        return "Payment amount must be greater than zero. Please share a valid payment amount in INR."
+
+    if status == "partial_payment_not_allowed":
+        return "Partial payments are not allowed for this account. Please share the full outstanding amount."
+
     if status in {"input_captured", "invalid_user_input"}:
         return pending_question(context)
 

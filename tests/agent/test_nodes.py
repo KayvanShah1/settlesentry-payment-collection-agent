@@ -284,3 +284,46 @@ def test_failed_payment_can_retry_missing_card_fields():
     assert "card_number" in result.required_fields
     assert deps.state.card_number is None
     assert deps.state.completed is False
+
+
+def test_amount_exceeding_balance_is_blocked_before_card_collection():
+    deps = make_deps()
+
+    submit_user_input(deps, "ACC1001")
+    lookup_account(deps)
+    submit_user_input(deps, "Nithin Jain")
+    submit_user_input(deps, "1990-05-14")
+    verify_identity(deps)
+
+    result = submit_user_input(deps, "2000")
+
+    assert result.ok is False
+    assert result.status == "amount_exceeds_balance"
+    assert result.required_fields == ("payment_amount",)
+    assert deps.state.payment_amount is None
+    assert deps.state.step == ConversationStep.WAITING_FOR_PAYMENT_AMOUNT
+
+
+def test_corrected_amount_exceeding_balance_is_blocked_before_payment_readiness():
+    deps = make_deps()
+
+    submit_user_input(deps, "ACC1001")
+    lookup_account(deps)
+    submit_user_input(deps, "Nithin Jain")
+    submit_user_input(deps, "1990-05-14")
+    verify_identity(deps)
+    submit_user_input(deps, "500")
+    submit_user_input(deps, "Nithin Jain")
+    submit_user_input(deps, "4532 0151 1283 0366")
+    submit_user_input(deps, "12/2027")
+    submit_user_input(deps, "123")
+    prepare_payment(deps)
+
+    result = submit_user_input(deps, "actually amount is INR 2000")
+
+    assert result.ok is False
+    assert result.status == "amount_exceeds_balance"
+    assert result.required_fields == ("payment_amount",)
+    assert deps.state.payment_amount is None
+    assert deps.state.payment_confirmed is False
+    assert deps.state.step == ConversationStep.WAITING_FOR_PAYMENT_AMOUNT

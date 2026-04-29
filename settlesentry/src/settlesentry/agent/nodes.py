@@ -13,6 +13,7 @@ from settlesentry.agent.policy import (
     LOOKUP_ACCOUNT_POLICY,
     PREPARE_PAYMENT_POLICY,
     PROCESS_PAYMENT_POLICY,
+    VALIDATE_PAYMENT_AMOUNT_POLICY,
     VERIFY_IDENTITY_POLICY,
     PolicyDecision,
     identity_matches_account,
@@ -188,6 +189,11 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
 
     deps.state.merge(extracted.model_copy(update={"confirmation": None}))
 
+    if extracted.payment_amount is not None and deps.state.verified:
+        blocked = _validate_payment_amount(deps, operation)
+        if blocked is not None:
+            return blocked
+
     if confirmation_received:
         deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
         return _result(
@@ -250,6 +256,11 @@ def handle_correction(deps: AgentDeps, extracted: ExtractedUserInput) -> AgentTo
         deps.state.payment_confirmed = False
 
     deps.state.merge(extracted.model_copy(update={"confirmation": None}))
+
+    if payment_amount_changed and deps.state.verified:
+        blocked = _validate_payment_amount(deps, operation)
+        if blocked is not None:
+            return blocked
 
     fields = required_fields(deps)
     node = recommended_node(deps)
@@ -533,6 +544,21 @@ def response_context(deps: AgentDeps, result: AgentToolResult | None) -> Respons
         facts=result.facts,
         safe_state=result.safe_state,
     )
+
+
+def _validate_payment_amount(
+    deps: AgentDeps,
+    operation: OperationLogContext,
+) -> AgentToolResult | None:
+    decision = VALIDATE_PAYMENT_AMOUNT_POLICY.evaluate(deps.state)
+
+    if decision.allowed:
+        return None
+
+    deps.state.payment_amount = None
+    deps.state.payment_confirmed = False
+
+    return _policy_blocked(deps, operation, decision)
 
 
 def _result(
