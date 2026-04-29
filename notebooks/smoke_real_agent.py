@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import os
-from datetime import date
 from typing import Literal
 
 from settlesentry.agent.agent import Agent
@@ -20,7 +19,7 @@ DETERMINISTIC_HAPPY_PATH_MESSAGES = [
     "I want to pay 500.00",
     "Nithin Jain",
     "4532 0151 1283 0366",
-    f"12/{date.today().year + 2}",
+    "12/2027",
     "123",
     "yes",
 ]
@@ -32,7 +31,7 @@ LLM_HAPPY_PATH_MESSAGES = [
     "Nithin Jain",
     "DOB is 1990-05-14",
     "I want to pay 500.00",
-    f"cardholder Nithin Jain, card number 4532 0151 1283 0366, expiry 12/{date.today().year + 2}",
+    "cardholder Nithin Jain, card number 4532 0151 1283 0366, expiry 12/2027",
     "123",
     "yes",
 ]
@@ -152,7 +151,7 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         choices=("happy-path", "interactive"),
-        default="interactive",
+        default="happy-path",
         help="Smoke test mode to run.",
     )
 
