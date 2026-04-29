@@ -3,10 +3,16 @@ from __future__ import annotations
 import argparse
 import os
 from datetime import date
+from typing import Literal
 
 from settlesentry.agent.agent import Agent
+from settlesentry.agent.parsers.deterministic import DeterministicInputParser
+from settlesentry.agent.responder import DeterministicResponseGenerator
 
-HAPPY_PATH_MESSAGES = [
+AgentMode = Literal["deterministic", "llm"]
+
+
+DETERMINISTIC_HAPPY_PATH_MESSAGES = [
     "Hi",
     "My account ID is ACC1001",
     "Nithin Jain",
@@ -14,10 +20,44 @@ HAPPY_PATH_MESSAGES = [
     "I want to pay 500.00",
     "Nithin Jain",
     "4532 0151 1283 0366",
-    "123",
     f"12/{date.today().year + 2}",
+    "123",
     "yes",
 ]
+
+
+LLM_HAPPY_PATH_MESSAGES = [
+    "Hi",
+    "My account ID is ACC1001",
+    "Nithin Jain",
+    "DOB is 1990-05-14",
+    "I want to pay 500.00",
+    f"cardholder Nithin Jain, card number 4532 0151 1283 0366, expiry 12/{date.today().year + 2}",
+    "123",
+    "yes",
+]
+
+
+def build_agent(agent_mode: AgentMode) -> Agent:
+    if agent_mode == "deterministic":
+        return Agent(
+            parser=DeterministicInputParser(),
+            responder=DeterministicResponseGenerator(),
+            grouped_card_collection=False,
+        )
+
+    validate_llm_environment()
+
+    return Agent(
+        grouped_card_collection=True,
+    )
+
+
+def happy_path_messages(agent_mode: AgentMode) -> list[str]:
+    if agent_mode == "llm":
+        return LLM_HAPPY_PATH_MESSAGES
+
+    return DETERMINISTIC_HAPPY_PATH_MESSAGES
 
 
 def print_turn(role: str, message: str) -> None:
@@ -45,13 +85,23 @@ def print_safe_state(agent: Agent) -> None:
     print(agent.state.safe_view(session_id=agent.session_id).model_dump_json(indent=2))
 
 
-def run_happy_path() -> None:
-    agent = Agent()
+def print_run_header(agent_mode: AgentMode, mode: str) -> None:
+    print(f"\nRunning SettleSentry smoke test: mode={mode}, agent_mode={agent_mode}")
 
-    print("\nRunning real-agent happy-path smoke test.")
-    print("This uses the configured OpenRouter model and the live assignment payment API.")
+    if agent_mode == "llm":
+        print("Using configured OpenRouter parser/responder and grouped card collection.")
+    else:
+        print("Using deterministic parser/responder and sequential card collection.")
 
-    for user_message in HAPPY_PATH_MESSAGES:
+    print("Payment lookup/payment calls still use the configured assignment payment API.")
+
+
+def run_happy_path(agent_mode: AgentMode) -> None:
+    agent = build_agent(agent_mode)
+
+    print_run_header(agent_mode=agent_mode, mode="happy-path")
+
+    for user_message in happy_path_messages(agent_mode):
         print_turn("USER", user_message)
 
         response = agent.next(user_message)
@@ -65,10 +115,10 @@ def run_happy_path() -> None:
     print_safe_state(agent)
 
 
-def run_interactive() -> None:
-    agent = Agent()
+def run_interactive(agent_mode: AgentMode) -> None:
+    agent = build_agent(agent_mode)
 
-    print("\nInteractive SettleSentry smoke test.")
+    print_run_header(agent_mode=agent_mode, mode="interactive")
     print("Type 'exit' or 'quit' to stop.\n")
 
     while True:
@@ -88,13 +138,17 @@ def run_interactive() -> None:
             break
 
 
-def validate_environment() -> None:
+def validate_llm_environment() -> None:
     if not os.getenv("OPENROUTER_API_KEY"):
-        raise RuntimeError("OPENROUTER_API_KEY is missing. Add it to your environment or .env file.")
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is missing. "
+            "Use --agent-mode deterministic or add OPENROUTER_API_KEY to your environment/.env file."
+        )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a real SettleSentry agent smoke test.")
+    parser = argparse.ArgumentParser(description="Run a SettleSentry agent smoke test.")
+
     parser.add_argument(
         "--mode",
         choices=("happy-path", "interactive"),
@@ -102,14 +156,22 @@ def main() -> None:
         help="Smoke test mode to run.",
     )
 
+    parser.add_argument(
+        "--agent-mode",
+        choices=("deterministic", "llm"),
+        default="llm",
+        help=(
+            "deterministic = fast local parser/responder with sequential card collection. "
+            "llm = OpenRouter parser/responder with grouped card collection."
+        ),
+    )
+
     args = parser.parse_args()
 
-    validate_environment()
-
     if args.mode == "interactive":
-        run_interactive()
+        run_interactive(agent_mode=args.agent_mode)
     else:
-        run_happy_path()
+        run_happy_path(agent_mode=args.agent_mode)
 
 
 if __name__ == "__main__":
