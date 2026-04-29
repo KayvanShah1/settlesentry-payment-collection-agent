@@ -92,6 +92,9 @@ def build_fallback_response(context: ResponseContext) -> str:
     if status == "partial_payment_not_allowed":
         return "Partial payments are not allowed for this account. Please share the full outstanding amount."
 
+    if status == "insufficient_balance":
+        return "The payment amount exceeds the outstanding balance. Please share a lower payment amount in INR."
+
     if status in {"input_captured", "invalid_user_input"}:
         return pending_question(context)
 
@@ -103,7 +106,10 @@ def build_fallback_response(context: ResponseContext) -> str:
 
     if status == "identity_verified":
         balance = context.facts.get("balance")
-        return f"Identity verified. Your outstanding balance is {format_amount_from_text(balance)}. Please share the payment amount in INR."
+        return (
+            f"Identity verified. Your outstanding balance is {format_amount_from_text(balance)}. "
+            "Please share the payment amount in INR."
+        )
 
     if status == "identity_verification_failed":
         return "I could not verify those details. Please share your full name exactly as registered on the account."
@@ -116,6 +122,27 @@ def build_fallback_response(context: ResponseContext) -> str:
 
     if status == "zero_balance":
         return "Identity verified. This account has no outstanding balance, so no payment is due. This conversation is now closed."
+
+    if status == "missing_card_fields":
+        return pending_question(context)
+
+    if status == "invalid_card":
+        return "The card number appears to be invalid. Please share the full card number again."
+
+    if status == "invalid_cvv":
+        return "The CVV appears to be invalid. Please share the CVV again."
+
+    if status == "invalid_expiry":
+        return "The card expiry appears to be invalid or expired. Please share the expiry in MM/YYYY format again."
+
+    if status in {"network_error", "timeout"}:
+        return "The payment service is currently unavailable. No payment has been processed. Please try again later."
+
+    if status in {"invalid_response", "unexpected_status", "payment_failed"}:
+        return "The payment could not be processed due to a payment service issue. No payment has been processed."
+
+    if status == "payment_attempts_exhausted":
+        return "Payment could not be completed after multiple attempts. No payment has been processed. This conversation is now closed."
 
     if status == "payment_ready_for_confirmation":
         amount = format_amount_from_text(context.facts.get("amount"))
@@ -143,9 +170,6 @@ def build_fallback_response(context: ResponseContext) -> str:
 
     if status == "cancelled":
         return "Payment flow cancelled. No payment has been processed. This conversation is now closed."
-
-    if status in {"invalid_card", "invalid_cvv", "invalid_expiry", "payment_failed", "missing_card_fields"}:
-        return pending_question(context)
 
     if context.required_fields:
         return pending_question(context)
