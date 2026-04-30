@@ -116,7 +116,7 @@ class ParserPatterns:
         r"(?i)\b(?:repeat|restate|say\s+that\s+again|what\s+did\s+you\s+ask|what\s+do\s+you\s+need)\b"
     )
     ASK_CURRENT_STATUS: Pattern[str] = re.compile(
-        r"(?i)\b(?:where\s+are\s+we|current\s+status|status|what\s+is\s+pending|what\s+is\s+left)\b"
+        r"(?i)\b(?:where\s+are\s+we|current\s+status|status|what\s+is\s+pending|what\s+is\s+left|balance)\b"
     )
     CORRECTION: Pattern[str] = re.compile(
         r"(?i)\b(?:correct|correction|change|update|actually|mistake|wrong|typo|edit)\b"

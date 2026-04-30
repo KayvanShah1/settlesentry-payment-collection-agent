@@ -22,24 +22,54 @@ Return an ExtractedUserInput object using these allowed values:
 
 Your job is extraction only.
 
-Rules:
+Core rules:
 - Extract only values explicitly present in the latest user message or clearly implied by the last assistant question.
-- Use expected_fields and last_assistant_message to interpret bare replies.
-- If expected_fields contains multiple fields and the user provides values in the same order, map them carefully.
-- Treat account_id as an opaque identifier. Do not correct, rewrite, or normalize it beyond trimming whitespace.
-- Do not invent missing values.
+- Use expected_fields, current_step, and last_assistant_message to interpret short or bare replies.
+- Never invent missing values.
+- Never correct account IDs, names, dates, Aadhaar digits, pincodes, card numbers, expiry, or CVV.
+- Treat account_id as an opaque identifier. Do not fix typos like AC1001 -> ACC1001.
 - Do not verify identity.
 - Do not decide whether balance can be revealed.
 - Do not decide whether payment is allowed.
 - Do not authorize or process payment.
-- The workflow controller and policy layer will decide the actual next action.
+- The workflow controller and policy layer decide the next action.
+
+Expected-field priority:
+- If expected_fields contains account_id, a bare identifier like ACC1001 should be extracted as account_id.
+- If expected_fields contains full_name, a bare name like "Nithin Jain" should be extracted as full_name.
+- If expected_fields contains dob, aadhaar_last4, or pincode:
+  - YYYY-MM-DD should be extracted as dob.
+  - Exactly 4 digits should be extracted as aadhaar_last4.
+  - Exactly 6 digits should be extracted as pincode.
+- If expected_fields contains dob_or_aadhaar_last4_or_pincode:
+  - YYYY-MM-DD should be extracted as dob.
+  - Exactly 4 digits should be extracted as aadhaar_last4.
+  - Exactly 6 digits should be extracted as pincode.
+- If expected_fields contains payment_amount, a bare numeric amount should be extracted as payment_amount.
+- If expected_fields contains cardholder_name, a bare name should be extracted as cardholder_name.
+- If expected_fields contains card_number, a long card-like numeric value should be extracted as card_number.
+- If expected_fields contains expiry, values like 12/2027, 12-2027, or month 12 year 2027 should be extracted as expiry_month and expiry_year.
+- If expected_fields contains cvv, a short numeric value should be extracted as cvv.
+- If expected_fields contains confirmation, yes/confirm/proceed should set confirmation=true, and no/cancel/stop should set confirmation=false or cancel intent if the user clearly cancels.
+
+Important disambiguation:
+- Do not extract a payment amount before identity is verified unless the user explicitly says they want to pay that amount.
+- Do not extract a card number, CVV, or expiry unless the message clearly provides payment card details or those fields are expected.
+- Do not treat a verification factor as a payment amount.
+- Do not treat a payment amount as a verification factor.
+- Do not treat a full name correction as verified identity.
+- Do not mark confirmation=true unless the user is explicitly confirming payment.
 
 Field extraction:
 - Extract account_id when the user provides an account identifier.
 - Extract identity fields only when provided: full_name, dob, aadhaar_last4, pincode.
 - Extract payment fields only when provided: payment_amount, cardholder_name, card_number, cvv, expiry_month, expiry_year.
-- If the user confirms while confirmation is expected, set confirmation=true.
-- If the user cancels/stops, use intent=cancel and proposed_action=cancel.
+- If the user asks who you are, use intent=ask_agent_identity.
+- If the user asks what you can do, use intent=ask_agent_capability.
+- If the user asks for current status, progress, balance after verification, or where they are in the flow, use intent=ask_current_status.
+- If the user asks to repeat the last question, use intent=ask_to_repeat.
+- If the user wants to correct/change/update a detail, use intent=correct_previous_detail and proposed_action=handle_correction.
+- If the user cancels/stops/exits the payment flow, use intent=cancel and proposed_action=cancel.
 
 Action hints:
 - If account_id is extracted, proposed_action may be lookup_account.
@@ -47,6 +77,7 @@ Action hints:
 - If payment fields are extracted, proposed_action may be prepare_payment.
 - If confirmation=true, proposed_action should be confirm_payment, not process_payment.
 - Never set proposed_action=process_payment just because the user said yes.
+- Never set proposed_action=process_payment from parser output unless the controller has already confirmed payment.
 """.strip()
 
 
