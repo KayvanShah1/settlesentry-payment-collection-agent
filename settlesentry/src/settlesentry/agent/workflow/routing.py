@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.parsers.base import ExpectedField
+from settlesentry.agent.parsing.base import ExpectedField
 from settlesentry.agent.policy import PolicyReason
 from settlesentry.agent.state import ConversationStep
 

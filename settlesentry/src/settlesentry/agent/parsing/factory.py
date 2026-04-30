@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from settlesentry.agent.parsers.base import InputParser, ParserContext
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
+from settlesentry.agent.parsing.base import InputParser, ParserContext
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
 from settlesentry.agent.state import ExtractedUserInput
 from settlesentry.core import get_logger, settings
 
@@ -143,7 +143,7 @@ def build_input_parser() -> InputParser:
 
     if settings.llm.enabled and settings.llm.api_key:
         try:
-            from settlesentry.agent.parsers.llm import PydanticAIInputParser
+            from settlesentry.agent.parsing.llm import PydanticAIInputParser
 
             return CombinedInputParser(
                 primary=PydanticAIInputParser(),

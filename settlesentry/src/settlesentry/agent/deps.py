@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from settlesentry.agent.parser import build_input_parser
-from settlesentry.agent.parsers.base import InputParser
-from settlesentry.agent.responder import ResponseGenerator, build_response_generator
+from settlesentry.agent.parsing.base import InputParser
+from settlesentry.agent.parsing.factory import build_input_parser
+from settlesentry.agent.response.writer import ResponseGenerator, build_response_generator
 from settlesentry.agent.state import ConversationState
 from settlesentry.integrations.payments.client import PaymentsClient
 

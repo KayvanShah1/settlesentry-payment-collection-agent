@@ -5,10 +5,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.graph import build_payment_graph
-from settlesentry.agent.messages import ResponseContext, build_fallback_response, format_amount
-from settlesentry.agent.parsers.base import InputParser
-from settlesentry.agent.responder import ResponseGenerator
+from settlesentry.agent.workflow.graph import build_payment_graph
+from settlesentry.agent.response.messages import ResponseContext, build_fallback_response, format_amount
+from settlesentry.agent.parsing.base import InputParser
+from settlesentry.agent.response.writer import ResponseGenerator
 from settlesentry.agent.state import ConversationState, ConversationStep
 from settlesentry.core import OperationLogContext, get_logger
 from settlesentry.integrations.payments.client import PaymentsClient

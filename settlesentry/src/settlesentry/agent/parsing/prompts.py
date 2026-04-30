@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from settlesentry.agent.actions import ProposedAction, UserIntent
-from settlesentry.agent.parsers.base import (
+from settlesentry.agent.parsing.base import (
     ConversationTurn,
     ExpectedField,
     ParserContext,

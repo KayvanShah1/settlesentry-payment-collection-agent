@@ -44,10 +44,10 @@ def build_agent(mode: AgentMode):
     """
     # CLI mode is the user-facing way to select parser/responder combinations
     # without changing Agent internals.
-    from settlesentry.agent.agent import Agent
-    from settlesentry.agent.parser import build_input_parser
-    from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-    from settlesentry.agent.responder import DeterministicResponseGenerator, build_response_generator
+    from settlesentry.agent.interface import Agent
+    from settlesentry.agent.parsing.deterministic import DeterministicInputParser
+    from settlesentry.agent.parsing.factory import build_input_parser
+    from settlesentry.agent.response.writer import DeterministicResponseGenerator, build_response_generator
     from settlesentry.core import settings
 
     if mode == AgentMode.LOCAL:

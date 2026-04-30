@@ -5,7 +5,7 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.nodes import (
+from settlesentry.agent.workflow.nodes import (
     confirm_payment_node,
     greet_user_node,
     lookup_account_node,
@@ -16,7 +16,7 @@ from settlesentry.agent.nodes import (
     submit_user_input_node,
     verify_identity_node,
 )
-from settlesentry.agent.tools.models import AgentToolResult
+from settlesentry.agent.workflow.result import AgentToolResult
 
 
 class PaymentGraphState(TypedDict, total=False):

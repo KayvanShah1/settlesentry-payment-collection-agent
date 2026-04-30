@@ -7,8 +7,8 @@ from pydantic import ValidationError
 
 from settlesentry.agent.actions import ProposedAction, UserIntent
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.messages import ResponseContext
-from settlesentry.agent.parsers.base import ParserContext
+from settlesentry.agent.response.messages import ResponseContext
+from settlesentry.agent.parsing.base import ParserContext
 from settlesentry.agent.policy import (
     LOOKUP_ACCOUNT_POLICY,
     PREPARE_PAYMENT_POLICY,
@@ -18,7 +18,7 @@ from settlesentry.agent.policy import (
     PolicyDecision,
     identity_matches_account,
 )
-from settlesentry.agent.routing import (
+from settlesentry.agent.workflow.routing import (
     expected_fields,
     recommended_node,
     required_fields,
@@ -26,7 +26,7 @@ from settlesentry.agent.routing import (
     set_step_from_required_fields,
 )
 from settlesentry.agent.state import ConversationStep, ExtractedUserInput, SafeConversationState
-from settlesentry.agent.tools.models import AgentToolResult
+from settlesentry.agent.workflow.result import AgentToolResult
 from settlesentry.core import OperationLogContext, get_logger, settings
 from settlesentry.integrations.payments.schemas import PaymentsAPIErrorCode
 

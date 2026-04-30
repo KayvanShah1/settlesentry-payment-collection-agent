@@ -21,3 +21,6 @@ class AgentToolResult(BaseModel):
     recommended_tool: str | None = None
     facts: dict[str, Any] = Field(default_factory=dict)
     safe_state: SafeConversationState
+
+
+__all__ = ["AgentToolResult"]
