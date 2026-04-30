@@ -37,6 +37,8 @@ class PydanticAIResponseGenerator:
     This does not call tools, mutate state, verify identity, reveal sensitive fields,
     or authorize payment. It only phrases a user-facing message from safe facts.
     """
+    # LLM response generation is optional; deterministic statuses still use fixed
+    # messages.
 
     def __init__(self) -> None:
         api_key = settings.llm.api_key.get_secret_value() if settings.llm.api_key else None
@@ -61,6 +63,8 @@ class PydanticAIResponseGenerator:
         )
 
     def generate(self, context: ResponseContext) -> str:
+        # Hard-stop for critical responses so LLM mode cannot soften/omit required
+        # safety language.
         if context.status in DETERMINISTIC_STATUSES:
             return build_fallback_response(context)
 
@@ -99,6 +103,8 @@ class CombinedResponseGenerator:
         self.fallback = fallback or DeterministicResponseGenerator()
 
     def generate(self, context: ResponseContext) -> str:
+        # Response fallback protects the public interface from LLM/provider
+        # failures.
         if self.primary is None:
             return self.fallback.generate(context)
 

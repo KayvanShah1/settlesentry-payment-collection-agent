@@ -33,6 +33,8 @@ def route_after_node(graph_state: PaymentGraphState) -> str:
     This prevents policy-blocked states like amount_exceeds_balance from
     repeatedly re-entering workflow nodes in the same turn.
     """
+    # Debug routing issues by checking result.recommended_tool from the previous
+    # node.
     deps = graph_state["deps"]
     result = graph_state.get("last_result")
 
@@ -58,6 +60,8 @@ def build_payment_graph():
     builder.add_node("recap_and_close", recap_and_close_node)
     builder.add_node("respond", response_node)
 
+    # Only registered node names can be returned as recommended_tool. Keep this
+    # map in sync with node result values.
     route_map = {
         "greet_user": "greet_user",
         "lookup_account": "lookup_account",
@@ -71,6 +75,8 @@ def build_payment_graph():
 
     builder.set_entry_point("submit_user_input")
 
+    # Every workflow node routes through the same decision function to avoid
+    # hidden branch-specific behavior.
     builder.add_conditional_edges("submit_user_input", route_after_node, route_map)
     builder.add_conditional_edges("greet_user", route_after_node, route_map)
     builder.add_conditional_edges("lookup_account", route_after_node, route_map)

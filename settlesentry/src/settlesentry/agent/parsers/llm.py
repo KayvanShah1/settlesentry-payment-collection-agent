@@ -21,6 +21,8 @@ class PydanticAIInputParser:
     """
 
     def __init__(self) -> None:
+        # The PydanticAI agent is initialized once per parser instance, not once
+        # per turn.
         api_key = settings.llm.api_key.get_secret_value() if settings.llm.api_key else None
 
         if not api_key:
@@ -55,6 +57,8 @@ class PydanticAIInputParser:
         operation = OperationLogContext(operation="llm_parse")
 
         try:
+            # LLM receives safe parser context only. It should extract fields, not
+            # make workflow decisions.
             result = self.agent.run_sync(
                 build_parser_user_prompt(
                     user_input=user_input,
@@ -70,6 +74,8 @@ class PydanticAIInputParser:
                 parsed = ExtractedUserInput.model_validate(output)
 
         except Exception as exc:
+            # Raise to CombinedInputParser so deterministic fallback can handle
+            # the turn.
             logger.debug(
                 "llm_parser_failed",
                 extra=operation.completed_extra(
@@ -94,6 +100,7 @@ class PydanticAIInputParser:
 
     @staticmethod
     def _extract_result_output(result: object) -> object:
+        # Supports both current and older PydanticAI result shapes.
         output = getattr(result, "output", None)
 
         # Compatibility fallback for older PydanticAI result objects.

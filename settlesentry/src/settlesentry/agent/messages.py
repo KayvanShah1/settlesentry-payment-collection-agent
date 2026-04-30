@@ -29,6 +29,8 @@ FIELD_LABELS = {
     "confirmation": "confirmation by replying yes or no",
 }
 
+# Critical compliance/safety responses bypass LLM phrasing for stable evaluator
+# behavior.
 DETERMINISTIC_STATUSES = {
     "greeting",
     "account_not_found",
@@ -61,6 +63,8 @@ def build_fallback_response(context: ResponseContext) -> str:
     status = context.status
 
     if status == "greeting":
+        # Greeting is deterministic so every mode clearly introduces SettleSentry
+        # and asks for account ID.
         return (
             "Hello, I’m SettleSentry, your payment collection assistant. "
             "I’ll help you verify your account and make a payment step by step. "
@@ -99,6 +103,8 @@ def build_fallback_response(context: ResponseContext) -> str:
         return f"Updated. {pending}" if pending else "Updated."
 
     if status == "account_not_found":
+        # Account-not-found is user-fixable; ask for a corrected ID without
+        # implying payment failure.
         return "I could not find an account for that account ID. Please check it and share the correct account ID."
 
     if status == "account_lookup_failed":
@@ -133,6 +139,8 @@ def build_fallback_response(context: ResponseContext) -> str:
         )
 
     if status == "identity_verification_failed":
+        # Failed verification tells attempts remaining but never reveals which
+        # sensitive field was expected or matched.
         attempts_remaining = context.facts.get("attempts_remaining")
         retry_note = ""
 
@@ -166,6 +174,8 @@ def build_fallback_response(context: ResponseContext) -> str:
         return "The card expiry appears to be invalid or expired. Please share the expiry in MM/YYYY format again."
 
     if status in {"network_error", "timeout"}:
+        # Terminal service errors close safely because payment status may be
+        # ambiguous after timeout/network failure.
         return (
             "The payment service is currently unavailable or the request timed out. "
             "I cannot safely continue this payment in the chat. Please try again later."
@@ -214,6 +224,8 @@ def build_fallback_response(context: ResponseContext) -> str:
 
 
 def pending_question(context: ResponseContext) -> str:
+    # Required fields are converted into user-facing prompts here; debug awkward
+    # prompts by checking required_fields first.
     fields = context.required_fields
 
     if not fields:

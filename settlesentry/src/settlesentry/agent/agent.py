@@ -22,6 +22,8 @@ class AgentResponse(BaseModel):
 
     Agent.next() returns this as a dict.
     """
+    # Public assignment contract: Agent.next() must return exactly {"message": str}.
+    # Keep this shape stable for external evaluators.
 
     message: str = Field(min_length=1, max_length=700)
 
@@ -42,6 +44,8 @@ class Agent:
         grouped_card_collection: bool = False,
         graph: Any | None = None,
     ) -> None:
+        # Dependency injection point used by tests, evaluator, CLI modes, and real API mode.
+        # Keep workflow logic out of __init__.
         deps_kwargs: dict[str, Any] = {
             "payments_client": payments_client or PaymentsClient(),
             "grouped_card_collection": grouped_card_collection,
@@ -71,9 +75,13 @@ class Agent:
         Returns:
             {"message": str}
         """
+        # Terminal conversations are short-circuited before graph execution so closed
+        # sessions cannot mutate state.
         if self.state.completed:
             return AgentResponse(message=self._closed_response()).model_dump()
 
+        # Payment success is finalized on the next turn to return a stable final recap
+        # and then close the session.
         if self.state.step == ConversationStep.PAYMENT_SUCCESS:
             return AgentResponse(message=self._finalize_success_response()).model_dump()
 
@@ -81,6 +89,8 @@ class Agent:
         step_before = self.state.step
 
         try:
+            # One user message equals one graph invocation. All state changes happen
+            # through deps.state inside graph nodes.
             result = self._graph.invoke(
                 {
                     "deps": self.deps,
@@ -94,6 +104,8 @@ class Agent:
             response = AgentResponse(message=message)
 
         except Exception as exc:
+            # Last-resort safety fallback: never expose stack traces or internal tool
+            # failures to the user.
             logger.exception(
                 "agent_turn_failed",
                 extra=operation.completed_extra(

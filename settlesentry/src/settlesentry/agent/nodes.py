@@ -33,6 +33,7 @@ from settlesentry.integrations.payments.schemas import PaymentsAPIErrorCode
 logger = get_logger("AgentNodes")
 
 
+# Side questions should answer briefly and preserve the pending workflow state.
 SIDE_QUESTION_INTENTS = {
     UserIntent.ASK_AGENT_IDENTITY,
     UserIntent.ASK_AGENT_CAPABILITY,
@@ -40,6 +41,8 @@ SIDE_QUESTION_INTENTS = {
     UserIntent.ASK_TO_REPEAT,
 }
 
+# Lightweight correction detector. Parser may miss correction intent, so this
+# catches common natural-language corrections.
 CORRECTION_TOKENS = (
     "correct",
     "correction",
@@ -66,6 +69,8 @@ CORRECTABLE_FIELDS = (
     "expiry_year",
 )
 
+# Lookup service failures are mapped away from payment failures because payment
+# has not started yet.
 LOOKUP_SERVICE_ERROR_STATUSES = {
     "invalid_response",
     "unexpected_status",
@@ -73,6 +78,8 @@ LOOKUP_SERVICE_ERROR_STATUSES = {
     "timeout",
 }
 
+# Terminal payment errors are not auto-retried by the agent because payment
+# status may be ambiguous.
 TERMINAL_PAYMENT_SERVICE_ERRORS = {
     PaymentsAPIErrorCode.NETWORK_ERROR,
     PaymentsAPIErrorCode.TIMEOUT,
@@ -141,6 +148,8 @@ def greet_user(deps: AgentDeps) -> AgentToolResult:
     if deps.state.completed:
         return _result(deps, operation, ok=False, status="conversation_closed")
 
+    # Greeting always resets only the step, not state, so repeated "hi" inside a
+    # live flow does not erase progress.
     deps.state.step = ConversationStep.WAITING_FOR_ACCOUNT_ID
 
     return _result(
@@ -153,6 +162,8 @@ def greet_user(deps: AgentDeps) -> AgentToolResult:
 
 
 def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
+    # Main input ingestion node: parse, handle side/cancel/correction, merge
+    # state, then decide next tool.
     operation = OperationLogContext(operation="submit_user_input")
 
     if deps.state.completed:
@@ -180,6 +191,8 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
         )
 
     if correction_requested and extracted.intent != UserIntent.CANCEL:
+        # Corrections are forced from raw text because LLM/parser outputs may
+        # classify them as ordinary field updates.
         extracted = extracted.model_copy(
             update={
                 "intent": UserIntent.CORRECT_PREVIOUS_DETAIL,
@@ -193,6 +206,8 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
         return _result(deps, operation, ok=True, status="cancelled")
 
     if extracted.intent in SIDE_QUESTION_INTENTS:
+        # Do not merge side-question text into state; return current required
+        # fields so the responder can continue the flow.
         return _result(
             deps,
             operation,
@@ -206,14 +221,20 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
 
     confirmation_received = extracted.confirmation is True
 
+    # Normal user data enters state here. Merge does not clear previous values
+    # unless a specific branch does so later.
     deps.state.merge(extracted.model_copy(update={"confirmation": None}))
 
     if extracted.payment_amount is not None and deps.state.verified:
+        # Amount is validated immediately after capture so card details are never
+        # collected for an invalid amount.
         blocked = _validate_payment_amount(deps, operation)
         if blocked is not None:
             return blocked
 
     if confirmation_received:
+        # Confirmation is captured separately from payment processing;
+        # confirm_payment still re-checks policy before process_payment.
         deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
         return _result(
             deps,
@@ -238,6 +259,8 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
 
 
 def handle_correction(deps: AgentDeps, extracted: ExtractedUserInput) -> AgentToolResult:
+    # Corrections deliberately reset downstream state. Earlier corrected fields
+    # can invalidate verification/payment readiness.
     operation = OperationLogContext(operation="handle_correction")
 
     if deps.state.completed:
@@ -265,13 +288,19 @@ def handle_correction(deps: AgentDeps, extracted: ExtractedUserInput) -> AgentTo
     )
 
     if account_changed:
+        # Account change invalidates every downstream fact because account data,
+        # verification, and payment amount belong to the old account.
         _clear_account_context(deps)
 
     if identity_changed:
+        # Identity correction invalidates verification and payment context;
+        # amount/card collection must restart after re-verification.
         deps.state.verified = False
         _clear_payment_context(deps)
 
     if payment_amount_changed or card_changed:
+        # Payment/card corrections require reconfirmation but do not affect
+        # identity verification.
         deps.state.payment_confirmed = False
 
     deps.state.merge(extracted.model_copy(update={"confirmation": None}))
@@ -328,6 +357,8 @@ def lookup_account(deps: AgentDeps) -> AgentToolResult:
 
     deps.state.account = result.account
 
+    # After account load, recompute required fields dynamically to support
+    # out-of-order name/DOB provided before lookup completes.
     fields = required_fields(deps)
     node = recommended_node(deps)
     set_step_from_required_fields(deps, fields)
@@ -353,6 +384,7 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
     if identity_matches_account(deps.state):
         deps.state.verified = True
 
+        # Balance is revealed only after full identity verification succeeds.
         balance = deps.state.outstanding_balance()
         if balance is not None and balance <= Decimal("0") and not settings.agent_policy.allow_zero_balance_payment:
             deps.state.mark_closed()
@@ -375,16 +407,20 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
             facts={"balance": str(balance)},
         )
 
+    # Failed verification counts as an attempt even when only one piece of the
+    # pair was wrong.
     deps.state.verification_attempts += 1
     attempts_remaining = settings.agent_policy.verification_max_attempts - deps.state.verification_attempts
 
     account = deps.state.account
 
     if account is not None and deps.state.provided_full_name == account.full_name:
-        # Full name was correct, so only retry the secondary verification factor.
+        # If the full name matched, keep it and retry only the secondary factor
+        # to avoid re-asking known-correct information.
         _clear_secondary_identity_inputs(deps)
     else:
-        # Full name may be wrong, so restart identity verification from full name.
+        # If the full name may be wrong, clear all identity inputs and restart
+        # from full name.
         _clear_identity_inputs(deps)
 
     if attempts_remaining <= 0:
@@ -421,6 +457,8 @@ def prepare_payment(deps: AgentDeps) -> AgentToolResult:
         deps.state.payment_confirmed = False
         return _policy_blocked(deps, operation, decision)
 
+    # Payment preparation only creates a confirmation prompt; no money movement
+    # happens here.
     deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
 
     return _result(
@@ -454,6 +492,7 @@ def confirm_payment(deps: AgentDeps, confirmed: bool) -> AgentToolResult:
     if not decision.allowed:
         return _policy_blocked(deps, operation, decision)
 
+    # User confirmation flips state only after prepare-payment policy is rechecked.
     deps.state.payment_confirmed = True
     deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
 
@@ -467,6 +506,8 @@ def confirm_payment(deps: AgentDeps, confirmed: bool) -> AgentToolResult:
 
 
 def process_payment(deps: AgentDeps) -> AgentToolResult:
+    # This is the only node that calls the payment API. Any premature payment bug
+    # should be debugged here and in PROCESS_PAYMENT_POLICY.
     operation = OperationLogContext(operation="process_payment")
 
     decision = PROCESS_PAYMENT_POLICY.evaluate(deps.state)
@@ -499,6 +540,8 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
         )
 
     if result.error_code in TERMINAL_PAYMENT_SERVICE_ERRORS:
+        # Close on ambiguous service failures so the agent does not double-charge
+        # or retry an unknown payment state.
         deps.state.mark_closed()
         _clear_payment_secrets(deps)
 
@@ -513,6 +556,8 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
             },
         )
 
+    # User-fixable API errors clear only the affected field so the user can retry
+    # without re-entering everything.
     if result.error_code in AMOUNT_RETRY_ERRORS:
         deps.state.payment_amount = None
 
@@ -529,6 +574,8 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
     attempts_remaining = settings.agent_policy.payment_max_attempts - deps.state.payment_attempts
 
     if attempts_remaining <= 0:
+        # Payment retries are capped; after exhaustion, clear secrets and close
+        # with no successful transaction.
         deps.state.mark_closed()
         _clear_payment_secrets(deps)
 
@@ -570,6 +617,8 @@ def recap_and_close(deps: AgentDeps) -> AgentToolResult:
         "reason": deps.state.last_error,
     }
 
+    # Final recap uses safe facts only and clears payment secrets before marking
+    # the session closed.
     deps.state.mark_closed()
     _clear_payment_secrets(deps)
 
@@ -654,6 +703,8 @@ def _policy_blocked(
     operation: OperationLogContext,
     decision: PolicyDecision,
 ) -> AgentToolResult:
+    # Policy failures are converted into required fields so the responder can
+    # give a specific next action.
     fields = required_fields_for_policy_reason(deps, decision.reason)
     set_step_from_required_fields(deps, fields)
 
@@ -684,11 +735,14 @@ def _clear_secondary_identity_inputs(deps: AgentDeps) -> None:
 
 
 def _clear_payment_secrets(deps: AgentDeps) -> None:
+    # Clear raw card number and CVV whenever payment completes, fails terminally,
+    # or the session closes.
     deps.state.card_number = None
     deps.state.cvv = None
 
 
 def _clear_payment_context(deps: AgentDeps) -> None:
+    # Clears all downstream payment fields when identity/account context changes.
     deps.state.payment_amount = None
     deps.state.cardholder_name = None
     deps.state.card_number = None
@@ -700,6 +754,8 @@ def _clear_payment_context(deps: AgentDeps) -> None:
 
 
 def _clear_account_context(deps: AgentDeps) -> None:
+    # Account correction resets the entire downstream workflow because all prior
+    # verification/payment data belonged to the old account.
     deps.state.account = None
     deps.state.verified = False
     deps.state.verification_attempts = 0

@@ -93,6 +93,8 @@ class PolicySet:
         )
 
     def evaluate(self, state: ConversationState) -> PolicyDecision:
+        # Policies are ordered guardrails. First failing rule determines both the
+        # status and the next required field.
         for rule in self.rules:
             decision = rule.check(state)
 
@@ -174,6 +176,8 @@ def require_account_loaded(state: ConversationState) -> PolicyDecision:
 
 
 def require_verification_attempts_available(state: ConversationState) -> PolicyDecision:
+    # Retry limits are checked before verifying the next attempt so exhausted
+    # sessions cannot continue.
     return _require_attempts_available(
         attempts=state.verification_attempts,
         max_attempts=settings.agent_policy.verification_max_attempts,
@@ -247,6 +251,8 @@ def require_payment_amount(state: ConversationState) -> PolicyDecision:
 
 
 def require_amount_within_balance(state: ConversationState) -> PolicyDecision:
+    # Local amount guardrail blocks overpayment before card collection or payment
+    # API calls.
     balance = state.outstanding_balance()
 
     if balance is None:
@@ -280,6 +286,8 @@ def require_amount_within_policy_limit(state: ConversationState) -> PolicyDecisi
 
 
 def require_complete_card_fields(state: ConversationState) -> PolicyDecision:
+    # Missing card fields are handled before building the final PaymentRequest
+    # schema.
     if not state.has_complete_card_fields():
         return _deny(
             reason=PolicyReason.MISSING_CARD_FIELDS,
@@ -290,6 +298,8 @@ def require_complete_card_fields(state: ConversationState) -> PolicyDecision:
 
 
 def require_valid_payment_request(state: ConversationState) -> PolicyDecision:
+    # Converts schema validation failures into user-recoverable policy blocks
+    # instead of runtime crashes.
     try:
         state.build_payment_request()
     except (ValueError, ValidationError) as exc:
@@ -344,6 +354,8 @@ def identity_matches_account(state: ConversationState) -> bool:
     Full name must match exactly, and at least one secondary factor must match
     exactly. Do not use fuzzy matching for this workflow.
     """
+    # Verification is atomic: full name must match exactly AND one secondary
+    # factor must match exactly.
     if not state.account:
         return False
 
@@ -408,6 +420,8 @@ PREPARE_PAYMENT_POLICY = PolicySet(
 )
 
 PROCESS_PAYMENT_POLICY = PolicySet(
+    # Payment processing has the strongest gate: verified identity, amount/card
+    # validity, attempts available, and explicit confirmation.
     name="process_payment",
     rules=PAYMENT_ELIGIBILITY_RULES
     + (PolicyRule("require_payment_attempts_available", require_payment_attempts_available),)

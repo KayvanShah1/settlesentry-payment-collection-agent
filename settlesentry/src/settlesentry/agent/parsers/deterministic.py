@@ -12,10 +12,14 @@ from settlesentry.agent.state import ExtractedUserInput
 
 
 class ParserPatterns:
+    # Labeled account IDs are treated as opaque lookup keys; existence is decided
+    # by the API, not regex format.
     ACCOUNT_ID: Pattern[str] = re.compile(
         r"(?i)\b(?:account\s*id|account_id|account|customer\s*id)\s*(?:is|:|=)?\s*"
         r"(?P<account_id>[A-Za-z0-9][A-Za-z0-9_-]{0,63})\b"
     )
+    # Bare account IDs require at least one digit to avoid treating ordinary
+    # words like "hello" as account IDs.
     BARE_ACCOUNT_ID: Pattern[str] = re.compile(
         r"^\s*(?P<account_id>(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9][A-Za-z0-9_-]{1,63})\s*$"
     )
@@ -84,6 +88,8 @@ class ParserPatterns:
         r"(?=\s+(?:and\s+)?(?:card(?:\s+number|_number)?|credit\s+card|debit\s+card|cvv|cvc|expiry|exp|valid\s+till|amount|payment|pay)\b|$)"
     )
 
+    # Name extraction is intentionally conservative because wrong name capture
+    # affects strict identity verification.
     FULL_NAME: Pattern[str] = re.compile(
         r"(?i)\b(?:my\s+name\s+is|i\s+am|i'm|this\s+is|name\s+is)\s+"
         r"(?P<full_name>[A-Za-z][A-Za-z\s.'-]{1,80})"
@@ -145,6 +151,8 @@ class DeterministicInputParser:
         user_input: str,
         context: ParserContext | None = None,
     ) -> ExtractedUserInput:
+        # Extraction order matters: cancel/side/correction intents are resolved
+        # before field extraction and action inference.
         text = user_input.strip()
 
         if not text:
@@ -264,6 +272,8 @@ class DeterministicInputParser:
         context: ParserContext | None,
         extracted: dict[str, object],
     ) -> None:
+        # Bare values are only mapped when the current step expects that field;
+        # this avoids interpreting "123" as CVV too early.
         if not context or not context.expected_fields:
             return
 
@@ -376,6 +386,8 @@ class DeterministicInputParser:
 
     @staticmethod
     def _clean_name(value: str) -> str:
+        # Trim trailing labels from multi-field messages like "Nithin Jain and
+        # DOB is..." so name verification stays exact.
         cleaned = value.strip(" .,'-\n\t")
 
         stop_words = (
@@ -426,6 +438,8 @@ class DeterministicInputParser:
 
     @staticmethod
     def _safe_model_validate(data: dict[str, object]) -> ExtractedUserInput:
+        # Invalid extracted fields are dropped field-by-field instead of failing
+        # the whole turn.
         try:
             return ExtractedUserInput.model_validate(data)
         except ValidationError:

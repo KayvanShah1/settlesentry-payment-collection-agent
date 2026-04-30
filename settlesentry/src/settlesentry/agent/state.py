@@ -22,6 +22,8 @@ from settlesentry.security.identity import (
 )
 
 EXTRACTED_TO_STATE_FIELD_MAP = {
+    # Parser output uses user-facing field names; state stores workflow-specific names.
+    # This map is the only place they should be coupled.
     "account_id": "account_id",
     "full_name": "provided_full_name",
     "dob": "provided_dob",
@@ -36,6 +38,8 @@ EXTRACTED_TO_STATE_FIELD_MAP = {
 }
 
 PAYMENT_INPUT_FIELDS = frozenset(
+    # Any payment-detail change invalidates prior confirmation so corrected details
+    # always require reconfirmation.
     {
         "payment_amount",
         "cardholder_name",
@@ -47,6 +51,8 @@ PAYMENT_INPUT_FIELDS = frozenset(
 )
 
 SECONDARY_FACTOR_FIELD_MAP = (
+    # Secondary factors are intentionally interchangeable: any one exact match with
+    # the loaded account verifies the second factor.
     ("provided_dob", "dob"),
     ("provided_aadhaar_last4", "aadhaar_last4"),
     ("provided_pincode", "pincode"),
@@ -91,6 +97,8 @@ class SafeConversationState(BaseModel):
     Never include DOB, Aadhaar, pincode, full card number, CVV, raw account
     details, last_error, or event_log here.
     """
+    # Safe state is the only state allowed in responses/log summaries. Do not add
+    # sensitive values here.
 
     session_id: str | None = None
     step: ConversationStep
@@ -135,6 +143,8 @@ class ExtractedUserInput(BaseModel):
     This schema is softer than the final payment API schemas because users can
     provide partial information across multiple turns.
     """
+    # Parser output is intentionally partial. Final validation happens later in
+    # policy/API schemas once enough fields are collected.
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -262,6 +272,8 @@ class ConversationState(BaseModel):
 
         Any payment-field change invalidates an earlier confirmation.
         """
+        # Merge is additive by design to support out-of-order inputs. Clearing
+        # happens only in explicit correction/failure branches.
 
         for source_field, target_field in EXTRACTED_TO_STATE_FIELD_MAP.items():
             value = getattr(extracted, source_field)
@@ -290,6 +302,8 @@ class ConversationState(BaseModel):
         if not self.account:
             return False
 
+        # Strict exact-match check for DOB/Aadhaar/pincode. No fuzzy matching or
+        # normalization beyond validators.
         for state_field, account_field in SECONDARY_FACTOR_FIELD_MAP:
             provided_value = getattr(self, state_field)
 
@@ -315,6 +329,8 @@ class ConversationState(BaseModel):
         return SafeConversationState.from_state(self, session_id=session_id)
 
     def build_card_details(self) -> CardDetails:
+        # This can raise validation errors for invalid local card payloads before
+        # calling the payment API.
         return CardDetails(
             cardholder_name=self.cardholder_name or "",
             card_number=self.card_number or "",
@@ -324,6 +340,8 @@ class ConversationState(BaseModel):
         )
 
     def build_payment_request(self) -> PaymentRequest:
+        # Final payload boundary before process-payment. Keep this strict because
+        # API calls should receive validated payloads only.
         if not self.account_id:
             raise ValueError("account_id is required to build payment request")
 

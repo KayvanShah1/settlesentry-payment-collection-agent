@@ -32,6 +32,8 @@ class CombinedInputParser:
     the deterministic extraction back in. This keeps LLM mode robust on simple
     recovery turns like bare names, DOBs, amounts, card numbers, CVV, and expiry.
     """
+    # Debug missed LLM extraction by comparing primary_output and fallback_output
+    # in _merge_missing_expected_fields.
 
     def __init__(
         self,
@@ -47,6 +49,8 @@ class CombinedInputParser:
         user_input: str,
         context: ParserContext | None = None,
     ) -> ExtractedUserInput:
+        # Always run deterministic parsing first so simple slot repairs are
+        # available even when LLM returns a valid but incomplete object.
         fallback_output = self.fallback.extract(user_input, context)
 
         if self.primary is None:
@@ -91,6 +95,8 @@ class CombinedInputParser:
         fallback_output: ExtractedUserInput,
         context: ParserContext | None,
     ) -> ExtractedUserInput:
+        # Repair only fields the agent is currently expecting; do not overwrite
+        # unrelated LLM extraction.
         if context is None or not context.expected_fields:
             return primary_output
 
@@ -113,6 +119,8 @@ class CombinedInputParser:
         if not updates:
             return primary_output
 
+        # Preserve LLM intent unless fallback supplied a missing expected field
+        # and the LLM left intent/action empty.
         if primary_output.intent is None and fallback_output.intent is not None:
             updates["intent"] = fallback_output.intent
 
@@ -129,6 +137,8 @@ def build_input_parser() -> InputParser:
     LLM parsing is enabled only when both OPENROUTER_ENABLED=true and an API key
     are configured. Otherwise the deterministic parser is used directly.
     """
+    # Runtime parser selection: deterministic by default unless OpenRouter is
+    # configured and enabled.
     fallback = DeterministicInputParser()
 
     if settings.llm.enabled and settings.llm.api_key:

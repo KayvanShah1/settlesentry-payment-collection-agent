@@ -10,6 +10,9 @@ from settlesentry.agent.parsers.base import (
     ParserStateSummary,
 )
 
+# Keep this prompt aligned with policy boundaries: extraction only, no
+# verification, no balance/payment decisions.
+# Account IDs are opaque. The parser must not correct typos like AC1001 -> ACC1001.
 PARSER_INSTRUCTIONS_TEMPLATE = """
 You are a structured input parser for a payment collection agent.
 
@@ -48,6 +51,8 @@ Action hints:
 
 
 class ParserPromptPayload(BaseModel):
+    # This payload gives the LLM enough state to interpret bare replies without
+    # exposing sensitive account facts.
     current_step: str
     expected_fields: tuple[ExpectedField, ...]
     last_assistant_message: str | None = None
