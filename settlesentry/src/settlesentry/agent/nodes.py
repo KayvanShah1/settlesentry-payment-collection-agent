@@ -378,9 +378,14 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
     deps.state.verification_attempts += 1
     attempts_remaining = settings.agent_policy.verification_max_attempts - deps.state.verification_attempts
 
-    # Keep full name if it was already provided. Only clear the secondary
-    # verification factors so the user does not need to re-enter their name.
-    _clear_secondary_identity_inputs(deps)
+    account = deps.state.account
+
+    if account is not None and deps.state.provided_full_name == account.full_name:
+        # Full name was correct, so only retry the secondary verification factor.
+        _clear_secondary_identity_inputs(deps)
+    else:
+        # Full name may be wrong, so restart identity verification from full name.
+        _clear_identity_inputs(deps)
 
     if attempts_remaining <= 0:
         deps.state.mark_closed()
