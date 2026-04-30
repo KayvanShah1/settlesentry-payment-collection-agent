@@ -17,6 +17,8 @@ from settlesentry.integrations.payments.schemas import (
     PaymentsAPIErrorCode,
 )
 
+# Client tests validate HTTP response mapping and ensure payment calls are not
+# retried automatically.
 
 def make_client(handler: Callable[[httpx.Request], httpx.Response]) -> PaymentsClient:
     transport = httpx.MockTransport(handler)

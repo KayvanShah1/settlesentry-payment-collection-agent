@@ -54,6 +54,8 @@ def make_agent() -> Agent:
     )
 
 
+# Public interface tests: these mirror how the assignment evaluator calls
+# Agent.next().
 def test_agent_next_returns_required_assignment_shape():
     agent = make_agent()
 
@@ -84,6 +86,7 @@ def test_agent_can_progress_from_greeting_to_account_lookup():
     assert "full name" in response["message"].lower()
 
 
+# Account IDs are opaque; unknown IDs should go to lookup and recover cleanly.
 def test_agent_treats_account_id_as_opaque_and_uses_lookup_result():
     agent = make_agent()
 

@@ -104,6 +104,8 @@ def collect_ready_payment(deps: AgentDeps) -> None:
     confirm_payment(deps, confirmed=True)
 
 
+# Node-level tests isolate state transitions and policy routing without invoking
+# the LangGraph wrapper.
 def test_node_workflow_completes_successful_payment_and_recap():
     deps = make_deps()
 
@@ -199,6 +201,8 @@ def test_account_not_found_can_recover_with_valid_account():
     assert deps.state.has_account_loaded() is True
 
 
+# Verification tests cover both wrong full-name recovery and wrong secondary-
+# factor recovery.
 def test_failed_secondary_verification_keeps_correct_full_name_and_retries_secondary():
     deps = make_deps()
 
@@ -349,6 +353,8 @@ def test_process_payment_is_blocked_without_confirmation():
     assert deps.state.transaction_id is None
 
 
+# Payment failure tests ensure retryable API errors clear only affected fields
+# and terminal errors close safely.
 def test_failed_payment_can_retry_missing_card_fields():
     deps = make_deps(FailingPaymentsClient())
 

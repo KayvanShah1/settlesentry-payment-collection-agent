@@ -7,6 +7,8 @@ from settlesentry.agent.parsers.deterministic import DeterministicInputParser
 from settlesentry.agent.state import ExtractedUserInput
 from settlesentry.core import settings
 
+# Combined parser tests protect LLM mode from valid-but-incomplete LLM outputs
+# by asserting deterministic slot repair.
 
 class _FixedParser:
     def __init__(self, result: ExtractedUserInput) -> None:
