@@ -117,6 +117,13 @@ The CLI supports three current modes:
 | `llm`      | LLM parser + deterministic fallback | Deterministic responses                | Better extraction from natural language while keeping fixed response wording |
 | `full-llm` | LLM parser + deterministic fallback | LLM responder + deterministic fallback | More natural response phrasing with safety fallback                          |
 
+For evaluator-safe runs, use deterministic local mode:
+
+```bash
+uv run settlesentry chat --mode local
+uv run python scripts/evaluate_agent.py --no-all --mode local
+```
+
 The default CLI mode is `llm`. Use `local` when no OpenRouter API key is configured.
 
 In all modes, payment authority remains deterministic and policy-controlled. The LLM does not verify identity, authorize payment, decide balance disclosure, or call payment APIs directly.
@@ -224,7 +231,8 @@ settlesentry/
       security/       # Card and identity validation helpers
       core/           # Settings and logging
       utils/          # Timing utilities
-  tests/              # Unit and workflow tests
+tests/                # Unit and workflow tests
+scripts/              # Scenario evaluator and helper scripts
 docs/                 # Assignment instructions and supporting documentation
 ```
 

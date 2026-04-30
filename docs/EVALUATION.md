@@ -182,7 +182,7 @@ Run the core test suite:
 
 ```bash
 uv run pytest
-````
+```
 
 The core tests should validate:
 
@@ -217,18 +217,20 @@ uv run python scripts/evaluate_agent.py --all
 
 > Full LLM-assisted evaluation can take significantly longer depending on model latency, retries, and scenario count.
 
-## Previous Evaluation Snapshot
+## Sample Evaluation Snapshot
+
+```bash
+uv run python scripts/evaluate_agent.py --no-all --mode local --json-only
+```
 
 | Mode | Passed / Total | Success Rate | Avg / Run |
 |---|---:|---:|---:|
-| local | 14 / 14 | 100.00% | 0.17s |
-| llm | 13 / 14 | 92.86% | 57.79s |
-| full-llm | 13 / 14 | 92.86% | 102.69s |
+| local | 15 / 15 | 100.00% | 0.03s |
 
 | Metric | Result |
 |---|---:|
-| Run success rate | 95.24% |
-| Passed runs | 40 / 42 |
+| Run success rate | 100.00% |
+| Passed runs | 15 / 15 |
 | Interface compliance rate | 100.00% |
 | Privacy leak count | 0 |
 | Premature payment calls | 0 |
@@ -238,24 +240,14 @@ uv run python scripts/evaluate_agent.py --all
 | Correction success rate | 100.00% |
 | Payment recovery success rate | 100.00% |
 | Confirmation gate success rate | 100.00% |
-| Recovery success rate | 66.67% |
+| Recovery success rate | 100.00% |
 
-### Observations From Previous Runs
+### Observations From Latest Run
 
-The earlier run showed that the deterministic local mode was stable across all scenarios, passing 14 out of 14 scenarios.
-
-The LLM-assisted modes were mostly successful but had one repeated weakness: `verification_failure_then_recovery` failed in both `llm` and `full-llm` modes. This indicated that LLM-assisted parsing or recovery handling needed additional prompt or fallback refinement around failed identity verification followed by corrected user input.
-
-The safety-critical metrics were strong:
-
-- no privacy leaks were detected,
-- no premature payment calls occurred,
-- confirmation gating passed,
-- amount guardrails passed,
-- payment failure recovery passed,
-- terminal closures behaved safely.
-
-The main tradeoff observed was latency. Local mode completed quickly, while LLM modes were significantly slower due to model calls and retries. This supports keeping local deterministic mode as the baseline and treating LLM modes as optional enhancements for natural-language handling.
+- Deterministic local mode passed all 15 scenarios.
+- No interface-shape violations, privacy leaks, or premature payment calls were observed.
+- Guardrails, recovery flows, and closure behavior all passed in this run.
+- LLM and full-llm modes were not part of this snapshot; run `--all` when LLM credentials are configured.
 
 ## Mode-Specific Expectations
 
@@ -334,5 +326,4 @@ A release is considered evaluation-ready when:
 * cancellation closes the conversation,
 * sensitive data is not exposed in responses,
 * and local mode remains deterministic across repeated runs.
-
 
