@@ -24,7 +24,6 @@ class AgentMode(StrEnum):
     LLM = "llm"
     FULL_LLM = "full-llm"
 
-
 def configure_console_logging(debug_logs: bool) -> None:
     """
     Configure console logging before importing agent modules.
@@ -122,40 +121,82 @@ def run_chat(
     # Do not print raw state by default; --show-state uses SafeConversationState
     # only.
     configure_console_logging(debug_logs)
+    from settlesentry.core import get_logger
+    from settlesentry.utils.timer import TimedOperation
+
+    logger = get_logger("CLI")
+    run = TimedOperation.begin("cli_chat")
+    end_reason = "unknown"
+    turn_count = 0
+    session_id: str | None = None
 
     try:
         agent = build_agent(mode)
     except Exception as exc:
+        logger.error(
+            "cli_chat_start_failed",
+            extra=run.completed_extra(
+                mode=mode.value,
+                error_type=type(exc).__name__,
+                end_reason="start_failed",
+            ),
+        )
         console.print(f"[red]Could not start agent:[/red] {exc}")
         raise typer.Exit(1) from exc
+
+    session_id = agent.session_id
+    logger.info(
+        "cli_chat_started",
+        extra=run.started_extra(
+            session_id=session_id,
+            mode=mode.value,
+            show_state=show_state,
+            debug_logs=debug_logs,
+        ),
+    )
 
     print_header(mode, debug_logs)
     console.print("[dim]Type 'exit' or 'quit' to stop.[/dim]\n")
 
-    while True:
-        user_input = typer.prompt("USER").strip()
+    try:
+        while True:
+            user_input = typer.prompt("YOU").strip()
 
-        if user_input.lower() in {"exit", "quit"}:
-            console.print("[yellow]Exiting.[/yellow]")
-            return
+            if user_input.lower() in {"exit", "quit"}:
+                end_reason = "user_exit"
+                console.print("[yellow]Exiting.[/yellow]")
+                return
 
-        try:
-            response = agent.next(user_input)
-            message = validate_agent_response(response)
-        except Exception as exc:
-            console.print(f"[red]Agent error:[/red] {type(exc).__name__}: {exc}")
-            raise typer.Exit(1) from exc
+            try:
+                response = agent.next(user_input)
+                message = validate_agent_response(response)
+                turn_count += 1
+            except Exception as exc:
+                end_reason = "agent_error"
+                console.print(f"[red]Agent error:[/red] {type(exc).__name__}: {exc}")
+                raise typer.Exit(1) from exc
 
-        console.print(f"\n[bold green]AGENT:[/bold green] {message}\n")
+            console.print(f"\n[bold green]AGENT:[/bold green] {message}\n")
 
-        if show_state:
-            safe_state = agent.state.safe_view(session_id=agent.session_id)
-            console.print("[dim]Privacy-safe state:[/dim]")
-            console.print_json(safe_state.model_dump_json())
+            if show_state:
+                safe_state = agent.state.safe_view(session_id=agent.session_id)
+                console.print("[dim]Privacy-safe state:[/dim]")
+                console.print_json(safe_state.model_dump_json())
 
-        if agent.state.completed:
-            console.print("[bold blue]Conversation completed.[/bold blue]")
-            return
+            if agent.state.completed:
+                end_reason = "conversation_completed"
+                console.print("[bold blue]Conversation completed.[/bold blue]")
+                return
+    finally:
+        logger.info(
+            "cli_chat_ended",
+            extra=run.completed_extra(
+                session_id=session_id,
+                mode=mode.value,
+                turn_count=turn_count,
+                end_reason=end_reason,
+            ),
+        )
 
 
 @app.callback(invoke_without_command=True)
