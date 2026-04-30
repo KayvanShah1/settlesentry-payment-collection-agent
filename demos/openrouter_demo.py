@@ -5,8 +5,8 @@ import argparse
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from settlesentry.agent.parsers.base import ParserContext
-from settlesentry.agent.parsers.llm import PydanticAIInputParser
+from settlesentry.agent.parsing.base import ParserContext
+from settlesentry.agent.parsing.llm import PydanticAIInputParser
 from settlesentry.agent.state import ConversationState, ConversationStep
 from settlesentry.core import settings
 
