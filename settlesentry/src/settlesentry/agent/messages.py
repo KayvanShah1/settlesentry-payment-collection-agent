@@ -152,7 +152,7 @@ def build_fallback_response(context: ResponseContext) -> str:
         )
 
     if status == "zero_balance":
-        return "Identity verified. This account has no outstanding balance, so no payment is due. This conversation is now closed."
+        return "Identity verified. There is no outstanding balance to pay on this account, so the payment flow is now closed."
 
     if status == "missing_card_fields":
         return pending_question(context)

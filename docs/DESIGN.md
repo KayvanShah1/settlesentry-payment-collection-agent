@@ -243,6 +243,9 @@ The implementation makes the following assumptions:
 * Terminal service failures are closed safely to avoid ambiguous payment retries.
 * Raw card number and CVV are cleared after success, terminal failure, cancellation, or closure.
 * LLM behavior is optional and must not be required for deterministic local execution.
+* The account balance represents an outstanding payable amount for the customer account.
+* Card details are collected only as the payment method for that outstanding balance.
+* This implementation does not assume the account itself is a credit card account.
 
 ## 8. Key Design Decisions
 
