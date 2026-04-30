@@ -208,12 +208,20 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
     if extracted.intent in SIDE_QUESTION_INTENTS:
         # Do not merge side-question text into state; return current required
         # fields so the responder can continue the flow.
+        facts: dict[str, object] = {}
+
+        if deps.state.verified:
+            balance = deps.state.outstanding_balance()
+            if balance is not None:
+                facts["balance"] = str(balance)
+
         return _result(
             deps,
             operation,
             ok=True,
             status=extracted.intent.value,
             required_fields=required_fields(deps),
+            facts=facts,
         )
 
     if extracted.intent == UserIntent.CORRECT_PREVIOUS_DETAIL:

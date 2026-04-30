@@ -65,15 +65,11 @@ def build_fallback_response(context: ResponseContext) -> str:
     if status == "greeting":
         # Greeting is deterministic so every mode clearly introduces SettleSentry
         # and asks for account ID.
-        return (
-            "Hello, I’m SettleSentry, your payment collection assistant. "
-            "I’ll help you verify your account and make a payment step by step. "
-            "Please share your account ID."
-        )
+        return "Hello, I’m SettleSentry. I help with account verification and payment. Please share your account ID."
 
     if status == "ask_agent_identity":
         return append_pending_question(
-            "I’m SettleSentry, a payment collection assistant.",
+            "I’m SettleSentry, a payment assistant that helps with account verification and payment.",
             context,
         )
 
@@ -135,7 +131,7 @@ def build_fallback_response(context: ResponseContext) -> str:
         balance = context.facts.get("balance")
         return (
             f"Identity verified. Your outstanding balance is {format_amount_from_text(balance)}. "
-            "Please share the payment amount in INR."
+            "Please share the amount you would like to pay in INR."
         )
 
     if status == "identity_verification_failed":
@@ -272,6 +268,9 @@ def build_status_summary(context: ResponseContext) -> str:
         return "The account has been found, and identity verification is still pending."
 
     if state.verified and state.payment_amount is None:
+        balance = context.facts.get("balance")
+        if balance is not None:
+            return f"Identity is verified. Your outstanding balance is {format_amount_from_text(balance)}."
         return "Identity is verified, and payment amount is pending."
 
     if state.payment_amount and not state.payment_confirmed:
