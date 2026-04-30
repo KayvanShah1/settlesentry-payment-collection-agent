@@ -20,8 +20,12 @@ class OperationLogContext:
     started_at: float = field(default_factory=perf_counter)
 
     @property
+    def duration_seconds(self) -> float:
+        return perf_counter() - self.started_at
+
+    @property
     def duration_ms(self) -> int:
-        return int((perf_counter() - self.started_at) * 1000)
+        return int(self.duration_seconds * 1000)
 
     def extra(self, **fields: Any) -> dict[str, Any]:
         return {
@@ -29,6 +33,9 @@ class OperationLogContext:
             "operation": self.operation,
             **fields,
         }
+
+    def started_extra(self, **fields: Any) -> dict[str, Any]:
+        return self.extra(**fields)
 
     def completed_extra(self, **fields: Any) -> dict[str, Any]:
         return self.extra(duration_ms=self.duration_ms, **fields)
