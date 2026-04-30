@@ -207,7 +207,7 @@ uv run pytest -q
 The public evaluation interface is `Agent.next(user_input: str) -> dict`.
 
 ```python
-from settlesentry.agent.agent import Agent
+from settlesentry.agent.interface import Agent
 
 agent = Agent()
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.messages import build_fallback_response
-from settlesentry.agent.nodes import (
+from settlesentry.agent.response.messages import build_fallback_response
+from settlesentry.agent.workflow.nodes import (
     confirm_payment,
     lookup_account,
     prepare_payment,
@@ -14,8 +14,8 @@ from settlesentry.agent.nodes import (
     submit_user_input,
     verify_identity,
 )
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.responder import DeterministicResponseGenerator
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
+from settlesentry.agent.response.writer import DeterministicResponseGenerator
 from settlesentry.agent.state import ConversationStep
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,

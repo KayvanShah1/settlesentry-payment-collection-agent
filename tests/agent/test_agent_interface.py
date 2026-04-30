@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from settlesentry.agent.agent import Agent
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.responder import DeterministicResponseGenerator
+from settlesentry.agent.interface import Agent
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
+from settlesentry.agent.response.writer import DeterministicResponseGenerator
 from settlesentry.agent.state import ConversationStep
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,

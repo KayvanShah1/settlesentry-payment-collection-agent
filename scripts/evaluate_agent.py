@@ -16,10 +16,10 @@ os.environ.setdefault("LOG_CONSOLE_ENABLED", "false")
 
 from rich.console import Console
 from rich.table import Table
-from settlesentry.agent.agent import Agent
-from settlesentry.agent.parser import build_input_parser
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.responder import (
+from settlesentry.agent.interface import Agent
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
+from settlesentry.agent.parsing.factory import build_input_parser
+from settlesentry.agent.response.writer import (
     DeterministicResponseGenerator,
     build_response_generator,
 )

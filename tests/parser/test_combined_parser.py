@@ -1,9 +1,9 @@
 import pytest
 from pydantic import SecretStr
 from settlesentry.agent.actions import ProposedAction, UserIntent
-from settlesentry.agent.parser import CombinedInputParser, build_input_parser
-from settlesentry.agent.parsers.base import ParserContext
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
+from settlesentry.agent.parsing.base import ParserContext
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
+from settlesentry.agent.parsing.factory import CombinedInputParser, build_input_parser
 from settlesentry.agent.state import ExtractedUserInput
 from settlesentry.core import settings
 
@@ -110,7 +110,7 @@ def test_build_input_parser_returns_combined_when_llm_available(monkeypatch: pyt
     monkeypatch.setattr(settings.llm, "enabled", True)
     monkeypatch.setattr(settings.llm, "api_key", SecretStr("test-key"))
 
-    import settlesentry.agent.parsers.llm as llm_module
+    import settlesentry.agent.parsing.llm as llm_module
 
     class DummyLLMParser:
         def extract(
@@ -137,7 +137,7 @@ def test_build_input_parser_falls_back_when_llm_init_fails(monkeypatch: pytest.M
     monkeypatch.setattr(settings.llm, "enabled", True)
     monkeypatch.setattr(settings.llm, "api_key", SecretStr("test-key"))
 
-    import settlesentry.agent.parsers.llm as llm_module
+    import settlesentry.agent.parsing.llm as llm_module
 
     class FailingLLMParser:
         def __init__(self) -> None:
@@ -151,7 +151,7 @@ def test_build_input_parser_falls_back_when_llm_init_fails(monkeypatch: pytest.M
 
 
 def test_combined_parser_falls_back_when_llm_result_has_no_output_shape():
-    from settlesentry.agent.parsers.llm import PydanticAIInputParser
+    from settlesentry.agent.parsing.llm import PydanticAIInputParser
 
     class ResultWithoutOutputOrData:
         pass
@@ -183,7 +183,7 @@ def test_combined_parser_logs_fallback_when_primary_raises(monkeypatch: pytest.M
     def fake_warning(message, *args, **kwargs):
         emitted.append((message, kwargs.get("extra", {})))
 
-    monkeypatch.setattr("settlesentry.agent.parser.logger.warning", fake_warning)
+    monkeypatch.setattr("settlesentry.agent.parsing.factory.logger.warning", fake_warning)
 
     fallback = _FixedParser(
         ExtractedUserInput(

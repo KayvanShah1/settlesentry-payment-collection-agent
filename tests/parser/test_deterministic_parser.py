@@ -2,8 +2,8 @@ from decimal import Decimal
 
 import pytest
 from settlesentry.agent.actions import ProposedAction, UserIntent
-from settlesentry.agent.parsers.base import ParserContext
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
+from settlesentry.agent.parsing.base import ParserContext
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
 from settlesentry.agent.state import ConversationState, ConversationStep, ExtractedUserInput
 
 # Deterministic parser tests document how bare values are interpreted from
