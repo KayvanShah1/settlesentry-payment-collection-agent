@@ -468,6 +468,29 @@ def assert_verification_recovery(
     )
 
 
+def assert_secondary_factor_recovery(
+    agent: Agent,
+    client: SpyPaymentsClient,
+    records: list[TurnRecord],
+) -> tuple[bool, str, dict]:
+    ok = (
+        agent.state.verified
+        and agent.state.verification_attempts == 1
+        and agent.state.step == ConversationStep.WAITING_FOR_PAYMENT_AMOUNT
+        and len(client.payment_calls) == 0
+    )
+
+    return (
+        ok,
+        "passed" if ok else "secondary-factor recovery failed",
+        {
+            "scenario_success": int(ok),
+            "recovery_success": int(ok),
+            "premature_payment_calls": len(client.payment_calls),
+        },
+    )
+
+
 def assert_verification_exhaustion(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
@@ -711,6 +734,18 @@ SCENARIOS = [
         assert_verification_recovery,
     ),
     EvalScenario(
+        "secondary_factor_failure_then_recovery",
+        "recovery",
+        [
+            "Hi",
+            "ACC1001",
+            "Nithin Jain",
+            "400004",
+            "400001",
+        ],
+        assert_secondary_factor_recovery,
+    ),
+    EvalScenario(
         "verification_exhaustion_closes",
         "failure_close",
         [
@@ -809,6 +844,7 @@ LLM_CORE_SCENARIOS = {
     "account_not_found_then_recovery",
     "amount_exceeds_balance_before_card_collection",
     "verification_failure_then_recovery",
+    "secondary_factor_failure_then_recovery",
     "side_question_preserves_pending_state",
     "payment_failure_recovery",
 }

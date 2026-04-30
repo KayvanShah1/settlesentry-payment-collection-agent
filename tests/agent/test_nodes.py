@@ -199,6 +199,48 @@ def test_account_not_found_can_recover_with_valid_account():
     assert deps.state.has_account_loaded() is True
 
 
+def test_failed_secondary_verification_keeps_correct_full_name_and_retries_secondary():
+    deps = make_deps()
+
+    submit_user_input(deps, "ACC1001")
+    lookup_account(deps)
+    submit_user_input(deps, "Nithin Jain")
+    submit_user_input(deps, "400004")
+
+    result = verify_identity(deps)
+
+    assert result.ok is False
+    assert result.status == "identity_verification_failed"
+    assert result.required_fields == ("dob_or_aadhaar_last4_or_pincode",)
+    assert deps.state.verification_attempts == 1
+    assert deps.state.provided_full_name == "Nithin Jain"
+    assert deps.state.provided_dob is None
+    assert deps.state.provided_aadhaar_last4 is None
+    assert deps.state.provided_pincode is None
+    assert deps.state.step == ConversationStep.WAITING_FOR_SECONDARY_FACTOR
+
+
+def test_failed_full_name_verification_restarts_from_full_name():
+    deps = make_deps()
+
+    submit_user_input(deps, "ACC1001")
+    lookup_account(deps)
+    submit_user_input(deps, "Wrong Name")
+    submit_user_input(deps, "1990-05-14")
+
+    result = verify_identity(deps)
+
+    assert result.ok is False
+    assert result.status == "identity_verification_failed"
+    assert result.required_fields == ("full_name",)
+    assert deps.state.verification_attempts == 1
+    assert deps.state.provided_full_name is None
+    assert deps.state.provided_dob is None
+    assert deps.state.provided_aadhaar_last4 is None
+    assert deps.state.provided_pincode is None
+    assert deps.state.step == ConversationStep.WAITING_FOR_FULL_NAME
+
+
 def test_sequential_card_details_are_not_asked_again():
     deps = make_deps()
 
