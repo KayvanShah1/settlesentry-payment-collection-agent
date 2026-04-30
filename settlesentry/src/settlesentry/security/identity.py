@@ -15,6 +15,7 @@ def normalize_optional_identity_text(value: Any) -> str | None:
 
 def validate_iso_date(value: str) -> str:
     """Validate strict ISO date text (YYYY-MM-DD)."""
+    # Strict date validation also handles leap-year edge cases like ACC1004's DOB.
     try:
         date.fromisoformat(value)
     except ValueError as exc:
@@ -25,6 +26,8 @@ def validate_iso_date(value: str) -> str:
 
 def validate_fixed_digits(value: str, *, digits: int, field_name: str) -> str:
     """Validate a numeric string with an exact fixed length."""
+    # Used for Aadhaar last 4 and pincode to reject malformed secondary factors
+    # before verification.
     if not re.fullmatch(rf"\d{{{digits}}}", value):
         raise ValueError(f"{field_name} must be exactly {digits} digits")
 

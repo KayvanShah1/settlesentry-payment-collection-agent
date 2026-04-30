@@ -22,6 +22,8 @@ from settlesentry.integrations.payments.schemas import (
 
 logger = get_logger("PaymentsClient")
 
+# Retries are used for account lookup only through _post_with_retry; payment
+# processing is not auto-retried to avoid duplicate-charge ambiguity.
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
@@ -38,6 +40,8 @@ def _post_with_retry(
     payload: dict[str, Any],
     timeout_seconds: int,
 ) -> httpx.Response:
+    # Shared retry wrapper for idempotent/read-like lookup calls. Do not use
+    # blindly for process_payment.
     response = client.post(
         url,
         json=payload,
@@ -74,6 +78,8 @@ class PaymentsClient:
         self._log_endpoint(context=context, endpoint=endpoint, url=url)
 
         try:
+            # Account IDs are opaque, but empty/invalid schema input is treated as
+            # not found so the user can retry cleanly.
             request = AccountLookupRequest(account_id=account_id)
         except ValidationError:
             result = LookupResult(
@@ -93,6 +99,8 @@ class PaymentsClient:
 
         try:
             http_call_made = True
+            # This is the only account lookup API boundary. If lookup calls look
+            # wrong, inspect request.model_dump here.
             response = _post_with_retry(
                 self.client,
                 url=url,
@@ -136,12 +144,16 @@ class PaymentsClient:
 
         try:
             http_call_made = True
+            # Payment API is called once per confirmed attempt; no retry wrapper
+            # here by design.
             response = self.client.post(
                 url,
                 json=payment_request.model_dump(mode="json"),
                 timeout=endpoint.timeout_seconds,
             )
         except httpx.TimeoutException:
+            # Timeout leaves payment status ambiguous, so the agent should close
+            # rather than retry automatically.
             result = PaymentResult(
                 ok=False,
                 error_code=PaymentsAPIErrorCode.TIMEOUT,
@@ -197,6 +209,8 @@ class PaymentsClient:
         http_call_made: bool,
         amount: float | None = None,
     ) -> None:
+        # Logs include account ID, amount, status, and transaction ID only; never
+        # add full card number or CVV here.
         extra = context.completed_extra(
             tool_name=endpoint.name.value,
             method=endpoint.method,
@@ -218,6 +232,8 @@ class PaymentsClient:
 
     @staticmethod
     def _map_lookup_response(response: httpx.Response) -> LookupResult:
+        # Normalize all lookup outcomes into LookupResult so nodes do not depend
+        # on raw HTTP status bodies.
         data = _parse_json(response)
 
         if data is None:
@@ -268,6 +284,8 @@ class PaymentsClient:
 
     @staticmethod
     def _map_payment_response(response: httpx.Response) -> PaymentResult:
+        # Normalize payment success/failure/error responses into PaymentResult for
+        # policy/retry handling.
         data = _parse_json(response)
 
         if data is None:

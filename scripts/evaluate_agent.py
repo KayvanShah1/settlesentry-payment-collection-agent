@@ -38,12 +38,16 @@ CONSOLE = Console()
 
 
 class EvalMode(StrEnum):
+    # Evaluate runtime behavior per mode because local, llm, and full-llm have
+    # different reliability/latency profiles.
     LOCAL = "local"
     LLM = "llm"
     FULL_LLM = "full-llm"
 
 
 class SpyPaymentsClient:
+    # Fake client records tool calls so correctness can include timing and
+    # premature-payment checks, not just final messages.
     def __init__(self, *, payment_outcomes: list[PaymentResult] | None = None) -> None:
         self.lookup_calls: list[str] = []
         self.payment_calls: list[dict] = []
@@ -181,6 +185,8 @@ def make_agent(client: SpyPaymentsClient, mode: EvalMode) -> Agent:
 
 
 def scan_privacy_leaks(message: str) -> list[str]:
+    # Conservative scanner for user-facing leaks. Keep in sync with sample
+    # account/card fixtures.
     leaks: list[str] = []
     lowered = message.lower()
 
@@ -215,6 +221,8 @@ def run_scenario_once(
     mode: EvalMode,
     repeat_index: int,
 ) -> ScenarioResult:
+    # Each scenario creates a fresh Agent instance so state leakage between
+    # scenarios is impossible.
     started_at = time.perf_counter()
 
     client = SpyPaymentsClient(payment_outcomes=scenario.payment_outcomes)
@@ -298,6 +306,8 @@ def run_scenario_with_retries(
     repeat_index: int,
     max_attempts: int,
 ) -> ScenarioResult:
+    # Retries are evaluation-level retries only; they do not change the agent's
+    # internal retry behavior.
     total_wall_time = 0.0
     first_attempt_passed = False
     last_result: ScenarioResult | None = None
@@ -354,6 +364,8 @@ def run_scenario_with_retries(
     return last_result
 
 
+# Assertions define business correctness for each scenario: final state, tool
+# calls, no privacy leak, no premature payment.
 def assert_happy_path(agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]) -> tuple[bool, str, dict]:
     ok = (
         agent.state.completed
@@ -840,6 +852,8 @@ SCENARIOS = [
 ]
 
 LLM_CORE_SCENARIOS = {
+    # Default LLM coverage is intentionally smaller because full LLM exhaustive
+    # evaluation is slow and provider-dependent.
     "happy_path_partial_payment",
     "account_not_found_then_recovery",
     "amount_exceeds_balance_before_card_collection",
@@ -877,6 +891,8 @@ def scenarios_for_mode(
 
 
 def resolve_modes(run_all: bool, requested_mode: str) -> list[EvalMode]:
+    # LLM modes are skipped unless OpenRouter is configured so local evaluation
+    # remains runnable anywhere.
     if not run_all:
         mode = EvalMode(requested_mode)
 
@@ -899,6 +915,8 @@ def resolve_modes(run_all: bool, requested_mode: str) -> list[EvalMode]:
 
 
 def aggregate_metrics(results: list[ScenarioResult]) -> dict:
+    # Metrics are run-level, not scenario-name-level, because modes/repeats can
+    # produce multiple runs per scenario.
     total = len(results)
     passed = sum(result.passed for result in results)
 
@@ -1076,6 +1094,8 @@ def write_report(results: list[ScenarioResult], metrics: dict) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
+    # Default run should be practical; use --exhaustive only for full all-mode
+    # stress evaluation.
     parser = argparse.ArgumentParser(description="Run scenario-based SettleSentry evaluation.")
     parser.add_argument(
         "--all",

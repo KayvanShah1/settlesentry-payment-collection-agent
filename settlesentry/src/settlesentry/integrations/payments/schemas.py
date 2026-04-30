@@ -84,6 +84,8 @@ class PaymentAPIModel(BaseModel):
 
 class AccountLookupRequest(PaymentAPIModel):
     """Request payload for account lookup tool call."""
+    # Account ID is treated as an opaque identifier. Do not enforce sample-only
+    # ACC<digits> format here.
 
     account_id: str = Field(
         ...,
@@ -136,6 +138,8 @@ class CardDetails(PaymentAPIModel):
     @field_validator("card_number")
     @classmethod
     def validate_card_number(cls, value: str) -> str:
+        # Local Luhn/length validation catches obvious card errors before
+        # process-payment API calls.
         digits = digits_only(value)
 
         if digits != value and not re.fullmatch(Patterns.CARD_ALLOWED_CHARS, value):
@@ -151,6 +155,8 @@ class CardDetails(PaymentAPIModel):
 
     @model_validator(mode="after")
     def validate_card_consistency(self) -> "CardDetails":
+        # CVV length depends on card type; expiry is validated locally before
+        # building PaymentRequest.
         is_amex = self.card_number.startswith(("34", "37")) and len(self.card_number) == 15
 
         if is_amex and len(self.cvv) != 4:
@@ -173,6 +179,8 @@ class PaymentMethod(PaymentAPIModel):
 
 class PaymentRequest(PaymentAPIModel):
     """Request payload for payment processing tool call."""
+    # This is the final schema boundary before process-payment; downstream code
+    # should not send unvalidated dicts.
 
     account_id: str = Field(..., min_length=1, max_length=64)
     amount: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)

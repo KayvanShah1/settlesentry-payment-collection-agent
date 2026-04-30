@@ -67,6 +67,8 @@ class LoggingConfig(BaseProjectSettings):
 
 class APIConfig(BaseProjectSettings):
     """External API configuration for the Prodigal payment verification API."""
+    # External API timeout/retry settings. Payment processing intentionally
+    # avoids automatic retry in the client.
 
     base_url: str = Field(
         default="https://se-payment-verification-api.service.external.usea2.aws.prodigaltech.com",
@@ -85,6 +87,8 @@ class LLMConfig(BaseProjectSettings):
     Keep disabled by default so the assignment remains deterministic and runnable
     without external LLM setup.
     """
+    # LLM is optional. Local mode and deterministic tests must work without
+    # OPENROUTER_API_KEY.
 
     enabled: bool = Field(default=True)
     api_key: SecretStr | None = Field(default=None)
@@ -102,6 +106,8 @@ class AgentPolicyConfig(BaseProjectSettings):
     """
     Operational policy for the payment collection agent.
     """
+    # Central place for retry limits and policy toggles; nodes should read policy
+    # values from here, not hardcode them.
 
     verification_max_attempts: int = Field(default=3, ge=1, le=5)
     payment_max_attempts: int = Field(default=3, ge=1, le=5)

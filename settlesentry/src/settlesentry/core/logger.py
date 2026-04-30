@@ -54,6 +54,8 @@ class SensitiveDataFilter(logging.Filter):
     """
     Redacts sensitive data before records reach console or file handlers.
     """
+    # Keep redaction rules broad because logs may receive extra fields from
+    # nodes, clients, or future tools.
 
     def filter(self, record: logging.LogRecord) -> bool:
         # Redact the rendered message.

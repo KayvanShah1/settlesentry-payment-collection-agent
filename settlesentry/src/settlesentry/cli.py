@@ -18,6 +18,8 @@ console = Console()
 
 
 class AgentMode(StrEnum):
+    # local is deterministic, llm uses LLM parser only, full-llm uses LLM parser
+    # and LLM responder.
     LOCAL = "local"
     LLM = "llm"
     FULL_LLM = "full-llm"
@@ -27,6 +29,8 @@ def configure_console_logging(debug_logs: bool) -> None:
     """
     Configure console logging before importing agent modules.
     """
+    # Must run before importing settings/logger-backed modules because settings
+    # are loaded at import time.
     os.environ["LOG_CONSOLE_ENABLED"] = "true" if debug_logs else "false"
 
 
@@ -39,6 +43,8 @@ def build_agent(mode: AgentMode):
     - llm: LLM parser + deterministic responder
     - full-llm: LLM parser + LLM responder
     """
+    # CLI mode is the user-facing way to select parser/responder combinations
+    # without changing Agent internals.
     from settlesentry.agent.agent import Agent
     from settlesentry.agent.parser import build_input_parser
     from settlesentry.agent.parsers.deterministic import DeterministicInputParser
@@ -75,6 +81,7 @@ def validate_agent_response(response: dict) -> str:
     """
     Validate the required assignment response contract.
     """
+    # Keeps interactive CLI aligned with the assignment evaluator contract.
     if not isinstance(response, dict):
         raise ValueError(f"Agent.next() returned {type(response).__name__}; expected dict.")
 
@@ -112,6 +119,8 @@ def run_chat(
     show_state: bool,
     debug_logs: bool,
 ) -> None:
+    # Do not print raw state by default; --show-state uses SafeConversationState
+    # only.
     configure_console_logging(debug_logs)
 
     try:
@@ -178,6 +187,7 @@ def main(
     """
     Run interactive chat by default when no subcommand is provided.
     """
+    # Allows both `settlesentry` and `settlesentry chat` entry styles.
     if ctx.invoked_subcommand is None:
         run_chat(
             mode=mode,
