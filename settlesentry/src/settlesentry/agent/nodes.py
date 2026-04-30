@@ -378,7 +378,9 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
     deps.state.verification_attempts += 1
     attempts_remaining = settings.agent_policy.verification_max_attempts - deps.state.verification_attempts
 
-    _clear_identity_inputs(deps)
+    # Keep full name if it was already provided. Only clear the secondary
+    # verification factors so the user does not need to re-enter their name.
+    _clear_secondary_identity_inputs(deps)
 
     if attempts_remaining <= 0:
         deps.state.mark_closed()
@@ -392,14 +394,15 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
             facts={"attempts_remaining": attempts_remaining},
         )
 
-    deps.state.step = ConversationStep.WAITING_FOR_FULL_NAME
+    fields = required_fields(deps)
+    set_step_from_required_fields(deps, fields)
 
     return _result(
         deps,
         operation,
         ok=False,
         status="identity_verification_failed",
-        required_fields=("full_name",),
+        required_fields=fields,
         facts={"attempts_remaining": attempts_remaining},
     )
 
@@ -664,6 +667,12 @@ def _policy_blocked(
 
 def _clear_identity_inputs(deps: AgentDeps) -> None:
     deps.state.provided_full_name = None
+    deps.state.provided_dob = None
+    deps.state.provided_aadhaar_last4 = None
+    deps.state.provided_pincode = None
+
+
+def _clear_secondary_identity_inputs(deps: AgentDeps) -> None:
     deps.state.provided_dob = None
     deps.state.provided_aadhaar_last4 = None
     deps.state.provided_pincode = None
