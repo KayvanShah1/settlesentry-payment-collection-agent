@@ -22,14 +22,11 @@ ResponseWriter = Callable[[ResponseContext], str]
 
 class PydanticAIResponseWriter:
     """
-    LLM response writer.
+    LLM response writer over safe response context.
 
-    This does not call tools, mutate state, verify identity, reveal sensitive fields,
-    or authorize payment. It only phrases a user-facing message from safe facts.
+    This writer never calls tools, mutates state, verifies identity, or authorizes
+    payment.
     """
-
-    # LLM response generation is optional; deterministic statuses still use fixed
-    # messages.
 
     def __init__(self) -> None:
         api_key = settings.llm.api_key.get_secret_value() if settings.llm.api_key else None
@@ -57,8 +54,7 @@ class PydanticAIResponseWriter:
         return self.generate(context)
 
     def generate(self, context: ResponseContext) -> str:
-        # Hard-stop for critical responses so LLM mode cannot soften/omit required
-        # safety language.
+        # Deterministic safety statuses always bypass LLM phrasing.
         if context.status in DETERMINISTIC_STATUSES:
             return build_fallback_response(context)
 
@@ -88,11 +84,7 @@ class PydanticAIResponseWriter:
 
 def build_response_writer() -> ResponseWriter:
     """
-    Build the response writer.
-
-    Deterministic response writing is the default. When LLM response writing is
-    enabled and configured, the LLM writer is used with per-turn deterministic
-    fallback.
+    Build response writer with deterministic fallback.
     """
     if settings.llm.enabled and settings.llm.api_key:
         try:

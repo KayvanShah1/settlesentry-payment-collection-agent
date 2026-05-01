@@ -75,8 +75,7 @@ def keep_only_expected_fields(
 
 
 def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
-    # Main input ingestion node: parse, handle side/cancel/correction, merge
-    # state, then decide next tool.
+    """Parse one turn, handle interruptions/corrections, merge state, and route."""
     operation = OperationLogContext(operation="submit_user_input")
 
     if deps.state.completed:
@@ -106,8 +105,7 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
         )
 
     if correction_requested and extracted.intent != UserIntent.CANCEL:
-        # Corrections are forced from raw text because LLM/parser outputs may
-        # classify them as ordinary field updates.
+        # Raw correction tokens override parser intent to preserve correction flow.
         extracted = extracted.model_copy(
             update={
                 "intent": UserIntent.CORRECT_PREVIOUS_DETAIL,
@@ -121,8 +119,7 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
         return result(deps, operation, ok=True, status="cancelled")
 
     if extracted.intent in SIDE_QUESTION_INTENTS:
-        # Do not merge side-question text into state; return current required
-        # fields so the responder can continue the flow.
+        # Side questions must not mutate workflow state.
         facts: dict[str, object] = {}
 
         if deps.state.verified:
@@ -147,21 +144,17 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
     confirmation_received = extracted.confirmation is True
     confirmation_expected = "confirmation" in current_expected_fields
 
-    # Normal user data enters state here. Merge does not clear previous values
-    # unless a specific branch does so later. Confirmation is intentionally not
-    # merged here because confirm_payment owns the final confirmation flip.
+    # Confirmation is handled by confirm_payment, not merge.
     deps.state.merge(extracted.model_copy(update={"confirmation": None}))
 
     if extracted.payment_amount is not None and deps.state.verified:
-        # Amount is validated immediately after capture so card details are never
-        # collected for an invalid amount.
+        # Validate amount before collecting card details.
         blocked = validate_payment_amount(deps, operation)
         if blocked is not None:
             return blocked
 
     if confirmation_received and confirmation_expected:
-        # Confirmation is actionable only when the workflow was already waiting
-        # for confirmation. Early "yes" replies must not advance payment.
+        # Early "yes" must not advance payment unless confirmation is expected.
         deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
         return result(
             deps,
@@ -186,8 +179,7 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
 
 
 def handle_correction(deps: AgentDeps, extracted: ExtractedUserInput) -> AgentToolResult:
-    # Corrections deliberately reset downstream state. Earlier corrected fields
-    # can invalidate verification/payment readiness.
+    """Apply a user correction and reset any invalidated downstream state."""
     operation = OperationLogContext(operation="handle_correction")
 
     if deps.state.completed:
@@ -215,19 +207,16 @@ def handle_correction(deps: AgentDeps, extracted: ExtractedUserInput) -> AgentTo
     )
 
     if account_changed:
-        # Account change invalidates every downstream fact because account data,
-        # verification, and payment amount belong to the old account.
+        # Account changes invalidate all downstream verification/payment context.
         clear_account_context(deps)
 
     if identity_changed:
-        # Identity correction invalidates verification and payment context;
-        # amount/card collection must restart after re-verification.
+        # Identity changes require re-verification before payment can continue.
         deps.state.verified = False
         clear_payment_context(deps)
 
     if payment_amount_changed or card_changed:
-        # Payment/card corrections require reconfirmation but do not affect
-        # identity verification.
+        # Payment detail changes always require fresh confirmation.
         deps.state.payment_confirmed = False
 
     deps.state.merge(extracted.model_copy(update={"confirmation": None}))

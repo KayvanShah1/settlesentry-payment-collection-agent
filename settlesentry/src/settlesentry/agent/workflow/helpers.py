@@ -91,8 +91,7 @@ def policy_blocked(
     operation: OperationLogContext,
     decision: PolicyDecision,
 ) -> AgentToolResult:
-    # Policy failures are converted into required fields so the responder can
-    # give a specific next action.
+    # Convert policy failures into actionable required fields.
     fields = required_fields_for_policy_reason(deps, decision.reason)
     set_step_from_required_fields(deps, fields)
 
@@ -123,14 +122,13 @@ def clear_secondary_identity_inputs(deps: AgentDeps) -> None:
 
 
 def clear_payment_secrets(deps: AgentDeps) -> None:
-    # Clear raw card number and CVV whenever payment completes, fails terminally,
-    # or the session closes.
+    # Always clear full card number and CVV after terminal outcomes.
     deps.state.card_number = None
     deps.state.cvv = None
 
 
 def clear_payment_context(deps: AgentDeps) -> None:
-    # Clears all downstream payment fields when identity/account context changes.
+    # Reset payment context when upstream identity/account data changes.
     deps.state.payment_amount = None
     deps.state.cardholder_name = None
     deps.state.card_number = None
@@ -142,8 +140,7 @@ def clear_payment_context(deps: AgentDeps) -> None:
 
 
 def clear_account_context(deps: AgentDeps) -> None:
-    # Account correction resets the entire downstream workflow because all prior
-    # verification/payment data belonged to the old account.
+    # Account corrections invalidate all downstream verification/payment context.
     deps.state.account = None
     deps.state.verified = False
     deps.state.verification_attempts = 0

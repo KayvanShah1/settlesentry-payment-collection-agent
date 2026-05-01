@@ -13,8 +13,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Callable
 
-# Force evaluator runs to suppress app console logs (same intent as CLI's
-# configure_console_logging with debug disabled).
+# Suppress app console logs during evaluator runs.
 os.environ["LOG_CONSOLE_ENABLED"] = "false"
 
 from pydantic import Field
@@ -89,16 +88,14 @@ SAMPLE_ACCOUNTS = {
 
 
 class EvalMode(StrEnum):
-    # Evaluate runtime behavior per mode because local, llm, and full-llm have
-    # different reliability/latency profiles.
+    # Modes are evaluated separately due to different latency/reliability profiles.
     LOCAL = "local"
     LLM = "llm"
     FULL_LLM = "full-llm"
 
 
 class SpyPaymentsClient:
-    # Fake client records tool calls so correctness can include timing and
-    # premature-payment checks, not just final messages.
+    # Evaluator fake that records lookup/payment calls for assertions.
     def __init__(self, *, payment_outcomes: list[PaymentResult] | None = None) -> None:
         self.lookup_calls: list[str] = []
         self.payment_calls: list[dict] = []
@@ -250,8 +247,7 @@ def make_agent(client: SpyPaymentsClient, mode: EvalMode) -> Agent:
 
 
 def scan_privacy_leaks(message: str) -> list[str]:
-    # Conservative scanner for user-facing leaks. Keep in sync with sample
-    # account/card fixtures.
+    # Conservative scanner for sensitive values in user-facing messages.
     leaks: list[str] = []
     lowered = message.lower()
 
@@ -286,8 +282,7 @@ def run_scenario_once(
     mode: EvalMode,
     repeat_index: int,
 ) -> ScenarioResult:
-    # Each scenario creates a fresh Agent instance so state leakage between
-    # scenarios is impossible.
+    # Fresh agent per scenario prevents cross-scenario state leakage.
     started_at = time.perf_counter()
 
     client = SpyPaymentsClient(payment_outcomes=scenario.payment_outcomes)
@@ -371,8 +366,7 @@ def run_scenario_with_retries(
     repeat_index: int,
     max_attempts: int,
 ) -> ScenarioResult:
-    # Retries are evaluation-level retries only; they do not change the agent's
-    # internal retry behavior.
+    # Evaluator retries are outside agent runtime retry logic.
     total_wall_time = 0.0
     first_attempt_passed = False
     last_result: ScenarioResult | None = None
@@ -489,8 +483,7 @@ def assertion_result(
     )
 
 
-# Assertions define business correctness for each scenario: final state, tool
-# calls, no privacy leak, no premature payment.
+# Scenario assertions validate business outcomes and guardrails.
 def assert_happy_path(agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]) -> tuple[bool, str, dict]:
     ok = (
         agent.state.completed
@@ -910,8 +903,7 @@ SCENARIOS = [
 ]
 
 LLM_CORE_SCENARIOS = {
-    # Default LLM coverage is intentionally smaller because full LLM exhaustive
-    # evaluation is slow and provider-dependent.
+    # LLM default coverage is smaller to control runtime and provider spend.
     "happy_path_partial_payment",
     "account_not_found_then_recovery",
     "amount_exceeds_balance_before_card_collection",
@@ -949,8 +941,7 @@ def scenarios_for_mode(
 
 
 def resolve_modes(run_all: bool, requested_mode: str) -> list[EvalMode]:
-    # LLM modes are skipped unless OpenRouter is configured so local evaluation
-    # remains runnable anywhere.
+    # Skip LLM modes when OpenRouter credentials are unavailable.
     if not run_all:
         mode = EvalMode(requested_mode)
 
@@ -973,8 +964,7 @@ def resolve_modes(run_all: bool, requested_mode: str) -> list[EvalMode]:
 
 
 def aggregate_metrics(results: list[ScenarioResult]) -> dict:
-    # Metrics are run-level, not scenario-name-level, because modes/repeats can
-    # produce multiple runs per scenario.
+    # Metrics are computed per run across mode/repeat combinations.
     total = len(results)
     passed = sum(result.passed for result in results)
 
@@ -1244,8 +1234,7 @@ def to_repo_relative(path: Path) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    # Default run should be practical; use --exhaustive only for full all-mode
-    # stress evaluation.
+    # Exhaustive mode is opt-in to avoid expensive default runs.
     parser = argparse.ArgumentParser(description="Run scenario-based SettleSentry evaluation.")
     parser.add_argument(
         "--all",

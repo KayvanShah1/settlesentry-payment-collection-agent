@@ -39,8 +39,7 @@ def greet_user(deps: AgentDeps) -> AgentToolResult:
     if deps.state.completed:
         return result(deps, operation, ok=False, status="conversation_closed")
 
-    # Greeting always resets only the step, not state, so repeated "hi" inside a
-    # live flow does not erase progress.
+    # Greeting resets the prompt step without clearing collected state.
     deps.state.step = ConversationStep.WAITING_FOR_ACCOUNT_ID
 
     return result(
@@ -84,8 +83,7 @@ def lookup_account(deps: AgentDeps) -> AgentToolResult:
 
     deps.state.account = lookup_result.account
 
-    # After account load, recompute required fields dynamically to support
-    # out-of-order name/DOB provided before lookup completes.
+    # Recompute required fields to respect out-of-order inputs.
     fields = required_fields(deps)
     node = recommended_node(deps)
     set_step_from_required_fields(deps, fields)
@@ -111,7 +109,7 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
     if identity_matches_account(deps.state):
         deps.state.verified = True
 
-        # Balance is revealed only after full identity verification succeeds.
+        # Reveal balance only after verification succeeds.
         balance = deps.state.outstanding_balance()
         if balance is not None and balance <= Decimal("0") and not settings.agent_policy.allow_zero_balance_payment:
             deps.state.mark_closed()
@@ -134,20 +132,17 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
             facts={"balance": str(balance)},
         )
 
-    # Failed verification counts as an attempt even when only one piece of the
-    # pair was wrong.
+    # Any failed verification attempt counts toward the retry limit.
     deps.state.verification_attempts += 1
     attempts_remaining = settings.agent_policy.verification_max_attempts - deps.state.verification_attempts
 
     account = deps.state.account
 
     if account is not None and deps.state.provided_full_name == account.full_name:
-        # If the full name matched, keep it and retry only the secondary factor
-        # to avoid re-asking known-correct information.
+        # Keep matched name and ask only for a new secondary factor.
         clear_secondary_identity_inputs(deps)
     else:
-        # If the full name may be wrong, clear all identity inputs and restart
-        # from full name.
+        # Reset identity inputs when the full name may be incorrect.
         clear_identity_inputs(deps)
 
     if attempts_remaining <= 0:
@@ -184,8 +179,7 @@ def prepare_payment(deps: AgentDeps) -> AgentToolResult:
         deps.state.payment_confirmed = False
         return policy_blocked(deps, operation, decision)
 
-    # Payment preparation only creates a confirmation prompt; no money movement
-    # happens here.
+    # Preparation only stages confirmation; no money movement happens here.
     deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
 
     return result(
@@ -219,7 +213,7 @@ def confirm_payment(deps: AgentDeps, confirmed: bool) -> AgentToolResult:
     if not decision.allowed:
         return policy_blocked(deps, operation, decision)
 
-    # User confirmation flips state only after prepare-payment policy is rechecked.
+    # Confirmation is applied only after policy re-validation.
     deps.state.payment_confirmed = True
     deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
 
@@ -233,8 +227,7 @@ def confirm_payment(deps: AgentDeps, confirmed: bool) -> AgentToolResult:
 
 
 def process_payment(deps: AgentDeps) -> AgentToolResult:
-    # This is the only node that calls the payment API. Any premature payment bug
-    # should be debugged here and in PROCESS_PAYMENT_POLICY.
+    # Only this operation may call the payment API.
     operation = OperationLogContext(operation="process_payment")
 
     decision = PROCESS_PAYMENT_POLICY.evaluate(deps.state)
@@ -267,8 +260,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
         )
 
     if payment_result.error_code in TERMINAL_PAYMENT_SERVICE_ERRORS:
-        # Close on ambiguous service failures so the agent does not double-charge
-        # or retry an unknown payment state.
+        # Close on ambiguous service failures to avoid unsafe retries.
         deps.state.mark_closed()
         clear_payment_secrets(deps)
 
@@ -283,8 +275,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
             },
         )
 
-    # User-fixable API errors clear only the affected field so the user can retry
-    # without re-entering everything.
+    # Retryable errors clear only impacted fields.
     if payment_result.error_code in AMOUNT_RETRY_ERRORS:
         deps.state.payment_amount = None
 
@@ -301,8 +292,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
     attempts_remaining = settings.agent_policy.payment_max_attempts - deps.state.payment_attempts
 
     if attempts_remaining <= 0:
-        # Payment retries are capped; after exhaustion, clear secrets and close
-        # with no successful transaction.
+        # Retry budget exhausted: close safely and clear secrets.
         deps.state.mark_closed()
         clear_payment_secrets(deps)
 
@@ -344,8 +334,7 @@ def recap_and_close(deps: AgentDeps) -> AgentToolResult:
         "reason": deps.state.last_error,
     }
 
-    # Final recap uses safe facts only and clears payment secrets before marking
-    # the session closed.
+    # Final recap uses safe facts; raw card data is cleared before close.
     deps.state.mark_closed()
     clear_payment_secrets(deps)
 

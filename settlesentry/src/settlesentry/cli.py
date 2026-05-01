@@ -18,32 +18,19 @@ console = Console()
 
 
 class AgentMode(StrEnum):
-    # local is deterministic, llm uses LLM parser only, full-llm uses LLM parser
-    # and LLM responder.
     LOCAL = "local"
     LLM = "llm"
     FULL_LLM = "full-llm"
 
 def configure_console_logging(debug_logs: bool) -> None:
-    """
-    Configure console logging before importing agent modules.
-    """
-    # Must run before importing settings/logger-backed modules because settings
-    # are loaded at import time.
+    """Configure console logging before importing settings-bound modules."""
     os.environ["LOG_CONSOLE_ENABLED"] = "true" if debug_logs else "false"
 
 
 def build_agent(mode: AgentMode):
     """
-    Build an Agent lazily after logging env has been configured.
-
-    Modes:
-    - local: deterministic parser + deterministic responder
-    - llm: LLM parser + deterministic responder
-    - full-llm: LLM parser + LLM responder
+    Build an agent for the selected CLI mode.
     """
-    # CLI mode is the user-facing way to select parser/responder combinations
-    # without changing Agent internals.
     from settlesentry.agent.interface import Agent
     from settlesentry.agent.parsing.deterministic import DeterministicInputParser
     from settlesentry.agent.parsing.factory import build_input_parser
@@ -78,10 +65,7 @@ def build_agent(mode: AgentMode):
 
 
 def validate_agent_response(response: dict) -> str:
-    """
-    Validate the required assignment response contract.
-    """
-    # Keeps interactive CLI aligned with the assignment evaluator contract.
+    """Validate assignment response contract: {'message': non-empty str}."""
     if not isinstance(response, dict):
         raise ValueError(f"Agent.next() returned {type(response).__name__}; expected dict.")
 
@@ -119,8 +103,7 @@ def run_chat(
     show_state: bool,
     debug_logs: bool,
 ) -> None:
-    # Do not print raw state by default; --show-state uses SafeConversationState
-    # only.
+    # --show-state prints only SafeConversationState.
     configure_console_logging(debug_logs)
     from settlesentry.core import get_logger
     from settlesentry.utils.timer import TimedOperation
@@ -226,10 +209,7 @@ def main(
         ),
     ] = False,
 ) -> None:
-    """
-    Run interactive chat by default when no subcommand is provided.
-    """
-    # Allows both `settlesentry` and `settlesentry chat` entry styles.
+    """Run interactive chat when no subcommand is provided."""
     if ctx.invoked_subcommand is None:
         run_chat(
             mode=mode,

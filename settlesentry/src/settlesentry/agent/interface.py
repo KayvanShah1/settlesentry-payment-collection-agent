@@ -17,9 +17,7 @@ logger = get_logger("Agent")
 
 class Agent:
     """
-    Required assignment-facing interface.
-
-    One Agent instance represents one conversation/session.
+    Assignment-facing agent interface.
     """
 
     def __init__(
@@ -55,13 +53,9 @@ class Agent:
 
     def next(self, user_input: str) -> dict[str, str]:
         """
-        Process one turn of the conversation.
-
-        Returns:
-            {"message": str}
+        Process one user turn and return {"message": str}.
         """
-        # Terminal conversations are short-circuited before graph execution so closed
-        # sessions cannot mutate state.
+        # Closed sessions are immutable.
         if self.state.completed:
             return MessageResponse(message=self._closed_response()).model_dump()
 
@@ -69,8 +63,6 @@ class Agent:
         step_before = self.state.step
 
         try:
-            # One user message equals one graph invocation. All state changes happen
-            # through deps.state inside graph nodes.
             result = self._graph.invoke(
                 {
                     "deps": self.deps,
@@ -84,8 +76,7 @@ class Agent:
             response = MessageResponse(message=message)
 
         except Exception as exc:
-            # Last-resort safety fallback: never expose stack traces or internal tool
-            # failures to the user.
+            # Last-resort fallback avoids surfacing internal failures.
             logger.exception(
                 "agent_turn_failed",
                 extra=operation.completed_extra(
