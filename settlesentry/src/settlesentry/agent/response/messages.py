@@ -63,15 +63,15 @@ LOWER_AMOUNT_PROMPT = "Please share a lower payment amount in INR."
 NO_PAYMENT_PROCESSED = "No payment has been processed."
 CONVERSATION_CLOSED = "This conversation is now closed."
 UNSAFE_PAYMENT_CONTINUE = "I cannot safely continue this payment in the chat."
+TRY_AGAIN_LATER = "Please try again later or contact support if you need help."
 
 PAYMENT_UNAVAILABLE_MESSAGE = (
     "The payment service is currently unavailable or the request timed out. "
-    f"{UNSAFE_PAYMENT_CONTINUE} Please try again later."
+    f"{UNSAFE_PAYMENT_CONTINUE} {TRY_AGAIN_LATER}"
 )
 
 PAYMENT_SERVICE_FAILURE_MESSAGE = (
-    "The payment could not be processed due to a payment service issue. "
-    f"{UNSAFE_PAYMENT_CONTINUE}"
+    f"The payment could not be processed due to a payment service issue. {UNSAFE_PAYMENT_CONTINUE} {TRY_AGAIN_LATER}"
 )
 
 
@@ -202,7 +202,9 @@ def _identity_verification_failed(context: ResponseContext) -> str:
     retry_note = ""
 
     if attempts_remaining is not None:
-        retry_note = f" You have {attempts_remaining} verification attempt{'s' if attempts_remaining != 1 else ''} remaining."
+        retry_note = (
+            f" You have {attempts_remaining} verification attempt{'s' if attempts_remaining != 1 else ''} remaining."
+        )
 
     return f"I could not verify those details.{retry_note} {pending_question(context)}"
 
@@ -228,7 +230,9 @@ def _conversation_closed(context: ResponseContext) -> str:
 
     if transaction_id:
         amount = format_amount_from_text(context.facts.get("payment_amount") or context.safe_state.payment_amount)
-        return f"Payment of {amount} was processed successfully. Transaction ID: {transaction_id}. {CONVERSATION_CLOSED}"
+        return (
+            f"Payment of {amount} was processed successfully. Transaction ID: {transaction_id}. {CONVERSATION_CLOSED}"
+        )
 
     return f"{CONVERSATION_CLOSED} {NO_PAYMENT_PROCESSED}"
 
@@ -249,7 +253,7 @@ STATIC_MESSAGES: dict[str, str] = {
     "account_loaded": "Account found. Please share your full name exactly as registered on the account.",
     "verification_exhausted": (
         "I'm unable to verify your identity after multiple attempts, so I can't continue with payment collection "
-        f"in this chat. {NO_PAYMENT_PROCESSED}"
+        f"in this chat. {NO_PAYMENT_PROCESSED} {TRY_AGAIN_LATER}."
     ),
     "zero_balance": "Identity verified. There is no outstanding balance to pay on this account, so the payment flow is now closed.",
     "invalid_card": "The card number appears to be invalid. Please share the full card number again.",
