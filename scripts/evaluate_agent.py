@@ -25,11 +25,8 @@ from rich.table import Table
 from settlesentry.agent.interface import Agent
 from settlesentry.agent.parsing.deterministic import DeterministicInputParser
 from settlesentry.agent.parsing.factory import CombinedInputParser, build_input_parser
-from settlesentry.agent.response.writer import (
-    CombinedResponseGenerator,
-    DeterministicResponseGenerator,
-    build_response_generator,
-)
+from settlesentry.agent.response.messages import ResponseContext, build_fallback_response
+from settlesentry.agent.response.writer import ResponseWriter, build_response_writer
 from settlesentry.agent.state import ConversationStep
 from settlesentry.core import settings
 from settlesentry.integrations.payments.schemas import (
@@ -159,15 +156,25 @@ class FailingInputParser:
         raise RuntimeError("simulated parser failure")
 
 
-class FailingResponseGenerator:
+class FailingResponseWriter:
     """
     Test double that simulates an LLM response-writer failure.
 
     Used only by evaluator fallback smoke checks.
     """
 
-    def generate(self, context):
+    def __call__(self, context):
         raise RuntimeError("simulated response failure")
+
+
+def with_fallback(primary: ResponseWriter, fallback: ResponseWriter) -> ResponseWriter:
+    def writer(context: ResponseContext) -> str:
+        try:
+            return primary(context)
+        except Exception:
+            return fallback(context)
+
+    return writer
 
 
 @dataclass
@@ -222,7 +229,7 @@ def make_agent(client: SpyPaymentsClient, mode: EvalMode) -> Agent:
         return Agent(
             payments_client=client,
             parser=DeterministicInputParser(),
-            responder=DeterministicResponseGenerator(),
+            responder=build_fallback_response,
             grouped_card_collection=False,
         )
 
@@ -230,14 +237,14 @@ def make_agent(client: SpyPaymentsClient, mode: EvalMode) -> Agent:
         return Agent(
             payments_client=client,
             parser=build_input_parser(),
-            responder=DeterministicResponseGenerator(),
+            responder=build_fallback_response,
             grouped_card_collection=True,
         )
 
     return Agent(
         payments_client=client,
         parser=build_input_parser(),
-        responder=build_response_generator(),
+        responder=build_response_writer(),
         grouped_card_collection=True,
     )
 
@@ -436,9 +443,9 @@ def run_fallback_smoke_checks() -> tuple[bool, str, dict]:
         fallback=DeterministicInputParser(),
     )
 
-    responder = CombinedResponseGenerator(
-        primary=FailingResponseGenerator(),
-        fallback=DeterministicResponseGenerator(),
+    responder = with_fallback(
+        primary=FailingResponseWriter(),
+        fallback=build_fallback_response,
     )
 
     agent = Agent(
