@@ -73,7 +73,7 @@ Status-specific behavior:
 - If status is "payment_success", include transaction ID and say the conversation is closed.
 - If status is "cancelled" or "conversation_closed", do not ask follow-up payment questions.
 
-Return only ResponseOutput with the message field.
+Return only MessageResponse with the message field.
 """.strip()
 
 __all__ = ["RESPONSE_INSTRUCTIONS"]

@@ -44,7 +44,7 @@ def response_node(graph_state: GraphState) -> GraphState:
     node_result: AgentToolResult | None = graph_state.get("last_result")
 
     context = response_context(deps, node_result)
-    message = deps.responder.generate(context)
+    message = deps.responder(context)
 
     return {"final_response": message}
 

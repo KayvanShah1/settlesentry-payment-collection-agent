@@ -47,13 +47,14 @@ def build_agent(mode: AgentMode):
     from settlesentry.agent.interface import Agent
     from settlesentry.agent.parsing.deterministic import DeterministicInputParser
     from settlesentry.agent.parsing.factory import build_input_parser
-    from settlesentry.agent.response.writer import DeterministicResponseGenerator, build_response_generator
+    from settlesentry.agent.response.messages import build_fallback_response
+    from settlesentry.agent.response.writer import build_response_writer
     from settlesentry.core import settings
 
     if mode == AgentMode.LOCAL:
         return Agent(
             parser=DeterministicInputParser(),
-            responder=DeterministicResponseGenerator(),
+            responder=build_fallback_response,
             grouped_card_collection=False,
         )
 
@@ -65,13 +66,13 @@ def build_agent(mode: AgentMode):
     if mode == AgentMode.LLM:
         return Agent(
             parser=build_input_parser(),
-            responder=DeterministicResponseGenerator(),
+            responder=build_fallback_response,
             grouped_card_collection=True,
         )
 
     return Agent(
         parser=build_input_parser(),
-        responder=build_response_generator(),
+        responder=build_response_writer(),
         grouped_card_collection=True,
     )
 

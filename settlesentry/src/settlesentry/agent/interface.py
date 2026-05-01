@@ -2,30 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
-
+from settlesentry.agent.contracts import MessageResponse
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.workflow.graph import build_payment_graph
-from settlesentry.agent.response.messages import ResponseContext, build_fallback_response, format_amount
 from settlesentry.agent.parsing.base import InputParser
-from settlesentry.agent.response.writer import ResponseGenerator
+from settlesentry.agent.response.messages import ResponseContext, build_fallback_response, format_amount
+from settlesentry.agent.response.writer import ResponseWriter
 from settlesentry.agent.state import ConversationState, ConversationStep
+from settlesentry.agent.workflow.graph import build_payment_graph
 from settlesentry.core import OperationLogContext, get_logger
 from settlesentry.integrations.payments.client import PaymentsClient
 
 logger = get_logger("Agent")
-
-
-class AgentResponse(BaseModel):
-    """
-    Required public response shape.
-
-    Agent.next() returns this as a dict.
-    """
-    # Public assignment contract: Agent.next() must return exactly {"message": str}.
-    # Keep this shape stable for external evaluators.
-
-    message: str = Field(min_length=1, max_length=700)
 
 
 class Agent:
@@ -40,12 +27,10 @@ class Agent:
         *,
         payments_client: PaymentsClient | None = None,
         parser: InputParser | None = None,
-        responder: ResponseGenerator | None = None,
+        responder: ResponseWriter | None = None,
         grouped_card_collection: bool = False,
         graph: Any | None = None,
     ) -> None:
-        # Dependency injection point used by tests, evaluator, CLI modes, and real API mode.
-        # Keep workflow logic out of __init__.
         deps_kwargs: dict[str, Any] = {
             "payments_client": payments_client or PaymentsClient(),
             "grouped_card_collection": grouped_card_collection,
@@ -78,12 +63,12 @@ class Agent:
         # Terminal conversations are short-circuited before graph execution so closed
         # sessions cannot mutate state.
         if self.state.completed:
-            return AgentResponse(message=self._closed_response()).model_dump()
+            return MessageResponse(message=self._closed_response()).model_dump()
 
         # Payment success is finalized on the next turn to return a stable final recap
         # and then close the session.
         if self.state.step == ConversationStep.PAYMENT_SUCCESS:
-            return AgentResponse(message=self._finalize_success_response()).model_dump()
+            return MessageResponse(message=self._finalize_success_response()).model_dump()
 
         operation = OperationLogContext(operation="agent_turn")
         step_before = self.state.step
@@ -101,7 +86,7 @@ class Agent:
             )
 
             message = result.get("final_response") or self._fallback_response()
-            response = AgentResponse(message=message)
+            response = MessageResponse(message=message)
 
         except Exception as exc:
             # Last-resort safety fallback: never expose stack traces or internal tool
@@ -115,7 +100,7 @@ class Agent:
                     error_type=type(exc).__name__,
                 ),
             )
-            response = AgentResponse(message=self._fallback_response())
+            response = MessageResponse(message=self._fallback_response())
 
         logger.info(
             "agent_turn_completed",

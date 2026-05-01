@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import Callable
 
-from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
+from settlesentry.agent.contracts import MessageResponse
 from settlesentry.agent.response.messages import (
     DETERMINISTIC_STATUSES,
     ResponseContext,
@@ -15,23 +15,12 @@ from settlesentry.agent.response.messages import (
 from settlesentry.agent.response.prompts import RESPONSE_INSTRUCTIONS
 from settlesentry.core import OperationLogContext, get_logger, settings
 
-logger = get_logger("ResponseGenerator")
+logger = get_logger("ResponseWriter")
+
+ResponseWriter = Callable[[ResponseContext], str]
 
 
-class ResponseOutput(BaseModel):
-    message: str = Field(min_length=1, max_length=700)
-
-
-class ResponseGenerator(Protocol):
-    def generate(self, context: ResponseContext) -> str: ...
-
-
-class DeterministicResponseGenerator:
-    def generate(self, context: ResponseContext) -> str:
-        return build_fallback_response(context)
-
-
-class PydanticAIResponseGenerator:
+class PydanticAIResponseWriter:
     """
     LLM response writer.
 
@@ -46,7 +35,7 @@ class PydanticAIResponseGenerator:
         api_key = settings.llm.api_key.get_secret_value() if settings.llm.api_key else None
 
         if not api_key:
-            raise RuntimeError("Response generator requires OPENROUTER_API_KEY")
+            raise RuntimeError("Response writer requires OPENROUTER_API_KEY")
 
         self.agent = Agent(
             model=OpenRouterModel(
@@ -58,11 +47,14 @@ class PydanticAIResponseGenerator:
                     timeout=settings.llm.timeout_seconds,
                 ),
             ),
-            output_type=ResponseOutput,
+            output_type=MessageResponse,
             instructions=RESPONSE_INSTRUCTIONS,
-            name="SettleSentryResponseAgent",
+            name="SettleSentryResponseWriter",
             retries=settings.llm.retries,
         )
+
+    def __call__(self, context: ResponseContext) -> str:
+        return self.generate(context)
 
     def generate(self, context: ResponseContext) -> str:
         # Hard-stop for critical responses so LLM mode cannot soften/omit required
@@ -76,10 +68,10 @@ class PydanticAIResponseGenerator:
             result = self.agent.run_sync(context.model_dump_json(indent=2))
             output = getattr(result, "output", None) or getattr(result, "data", None)
 
-            if isinstance(output, ResponseOutput):
+            if isinstance(output, MessageResponse):
                 message = output.message
             else:
-                message = ResponseOutput.model_validate(output).message
+                message = MessageResponse.model_validate(output).message
 
             return message.strip()
 
@@ -94,43 +86,21 @@ class PydanticAIResponseGenerator:
             return build_fallback_response(context)
 
 
-class CombinedResponseGenerator:
-    def __init__(
-        self,
-        *,
-        primary: ResponseGenerator | None = None,
-        fallback: ResponseGenerator | None = None,
-    ) -> None:
-        self.primary = primary
-        self.fallback = fallback or DeterministicResponseGenerator()
+def build_response_writer() -> ResponseWriter:
+    """
+    Build the response writer.
 
-    def generate(self, context: ResponseContext) -> str:
-        # Response fallback protects the public interface from LLM/provider
-        # failures.
-        if self.primary is None:
-            return self.fallback.generate(context)
-
-        try:
-            return self.primary.generate(context)
-        except Exception:
-            return self.fallback.generate(context)
-
-
-def build_response_generator() -> ResponseGenerator:
-    fallback = DeterministicResponseGenerator()
-
+    Deterministic response writing is the default. When LLM response writing is
+    enabled and configured, the LLM writer is used with per-turn deterministic
+    fallback.
+    """
     if settings.llm.enabled and settings.llm.api_key:
         try:
-            return CombinedResponseGenerator(
-                primary=PydanticAIResponseGenerator(),
-                fallback=fallback,
-            )
+            return PydanticAIResponseWriter()
         except Exception as exc:
             logger.warning(
                 "llm_responder_disabled_fallback",
                 extra={"error_type": type(exc).__name__},
             )
 
-    return fallback
-
-
+    return build_fallback_response

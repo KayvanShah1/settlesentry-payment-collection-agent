@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from settlesentry.agent.parsing.base import InputParser
 from settlesentry.agent.parsing.factory import build_input_parser
-from settlesentry.agent.response.writer import ResponseGenerator, build_response_generator
+from settlesentry.agent.response.writer import ResponseWriter, build_response_writer
 from settlesentry.agent.state import ConversationState
 from settlesentry.integrations.payments.client import PaymentsClient
 
@@ -19,7 +19,7 @@ class AgentDeps:
     state: ConversationState = field(default_factory=ConversationState)
     payments_client: PaymentsClient = field(default_factory=PaymentsClient)
     parser: InputParser = field(default_factory=build_input_parser)
-    responder: ResponseGenerator = field(default_factory=build_response_generator)
+    responder: ResponseWriter = field(default_factory=build_response_writer)
     session_id: str = field(default_factory=lambda: uuid4().hex[:12])
 
     # Explicit behavior flag.
