@@ -34,7 +34,7 @@ AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes t
 
 USER: yes
 AGENT: Payment of INR 500.00 was processed successfully. Transaction ID: txn_.... This conversation is now closed.
-````
+```
 
 ## 2. Verification Failure and Recovery
 
@@ -83,7 +83,7 @@ USER: Wrong Name Three
 AGENT: Please share your one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
 
 USER: 1990-05-14
-AGENT: I'm unable to verify your identity after multiple attempts, so I can't continue with payment collection in this chat. No payment has been processed.
+AGENT: I'm unable to verify your identity after multiple attempts, so I can't continue with payment collection in this chat. No payment has been processed. Please try again later or contact support if you need help.
 ```
 
 ## 4. Account Not Found and Recovery
@@ -118,7 +118,7 @@ USER: 2000
 AGENT: The payment amount cannot exceed the outstanding balance. Please share a lower payment amount in INR.
 ```
 
-## 6. Invalid Card Payment Failure and Recovery
+## 6. Payment API Card Rejection and Recovery
 
 ```text
 USER: Hi
@@ -139,20 +139,20 @@ AGENT: Please share your cardholder name.
 USER: Nithin Jain
 AGENT: Please share your full card number.
 
-USER: 4111 1111 1111 1112
+USER: 4532015112830366
 AGENT: Please share your expiry in MM/YYYY format.
 
 USER: 12/2027
 AGENT: Please share your CVV.
 
 USER: 123
-AGENT: Payment of INR 500.00 using card ending 1112 is ready. Please reply yes to confirm or no to cancel.
+AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
 
 USER: yes
 AGENT: The card number appears to be invalid. Please share the full card number again.
 
-USER: 4532015112830366
-AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
+USER: 5555555555554444
+AGENT: Payment of INR 500.00 using card ending 4444 is ready. Please reply yes to confirm or no to cancel.
 
 USER: yes
 AGENT: Payment of INR 500.00 was processed successfully. Transaction ID: txn_.... This conversation is now closed.
@@ -239,7 +239,7 @@ USER: Priya Agarwal
 AGENT: Please share your one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
 
 USER: 1992-08-10
-AGENT: Identity verified. This account has no outstanding balance, so no payment is due. This conversation is now closed.
+AGENT: Identity verified. There is no outstanding balance to pay on this account, so the payment flow is now closed.
 ```
 
 ## 10. Side Question During Flow
@@ -325,3 +325,85 @@ AGENT: Please share your one verification factor: DOB in YYYY-MM-DD format, Aadh
 
 USER: 1990-05-14
 AGENT: Identity verified. Your outstanding balance is INR 1250.75. Please share the amount you would like to pay in INR.
+```
+
+## 14. Structured Input Does Not Skip Verification
+
+```text
+USER: Hi
+AGENT: Hello, I'm SettleSentry. I help with account verification and payment. Please share your account ID.
+
+USER: ACC1001
+AGENT: Account found. Please share your full name exactly as registered on the account.
+
+USER: "account_id": "ACC1001", "full_name": "Nithin Jain", "dob": "1990-05-14", "aadhaar_last4": "4321", "pincode": "400001"
+AGENT: Please share your one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
+
+USER: 1990-05-14
+AGENT: Identity verified. Your outstanding balance is INR 1250.75. Please share the amount you would like to pay in INR.
+```
+
+## 15. Correct Name With Wrong Verification Factor
+
+```text
+USER: Hi
+AGENT: Hello, I'm SettleSentry. I help with account verification and payment. Please share your account ID.
+
+USER: ACC1001
+AGENT: Account found. Please share your full name exactly as registered on the account.
+
+USER: Nithin Jain
+AGENT: Please share your one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
+
+USER: 400004
+AGENT: I could not verify those details. You have 2 verification attempts remaining. Please share your one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
+
+USER: 400001
+AGENT: Identity verified. Your outstanding balance is INR 1250.75. Please share the amount you would like to pay in INR.
+```
+
+## 16. Payment Attempts Exhausted
+
+```text
+USER: Hi
+AGENT: Hello, I'm SettleSentry. I help with account verification and payment. Please share your account ID.
+
+USER: ACC1001
+AGENT: Account found. Please share your full name exactly as registered on the account.
+
+USER: Nithin Jain
+AGENT: Please share your one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
+
+USER: 1990-05-14
+AGENT: Identity verified. Your outstanding balance is INR 1250.75. Please share the amount you would like to pay in INR.
+
+USER: 500
+AGENT: Please share your cardholder name.
+
+USER: Nithin Jain
+AGENT: Please share your full card number.
+
+USER: 4532015112830366
+AGENT: Please share your expiry in MM/YYYY format.
+
+USER: 12/2027
+AGENT: Please share your CVV.
+
+USER: 123
+AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
+
+USER: yes
+AGENT: The card number appears to be invalid. Please share the full card number again.
+
+USER: 4532015112830366
+AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
+
+USER: yes
+AGENT: The card number appears to be invalid. Please share the full card number again.
+
+USER: 4532015112830366
+AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
+
+USER: yes
+AGENT: Payment could not be completed after multiple attempts. No payment has been processed. This conversation is now closed.
+```

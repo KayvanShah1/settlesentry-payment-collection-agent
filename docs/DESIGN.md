@@ -58,7 +58,7 @@ flowchart TD
     Z --> M
 
     M --> A[User-Facing Message]
-````
+```
 
 The workflow is graph-orchestrated and runs once per user turn. The conversation remains multi-turn because the same session keeps account, verification, payment, retry, and closure state across turns.
 
@@ -141,6 +141,8 @@ The LLM cannot override these checks.
 The language understanding layer extracts useful structure from user messages, such as account identifiers, names, verification factors, payment amounts, card details, confirmations, corrections, cancellations, and side questions.
 
 This layer can be deterministic or LLM-assisted. In both cases, extracted information is treated as user-provided input, not as authorization.
+
+The parser may extract multiple fields from a single message, especially in LLM-assisted modes. Before merging into conversation state, the workflow keeps only fields that are expected for the current step, except for explicit correction flows. This prevents a pasted account record or unrelated structured text from skipping verification steps or advancing the payment flow prematurely.
 
 ### Response Layer
 
@@ -253,7 +255,7 @@ The implementation makes the following assumptions:
 * Outstanding balance is safe to show only after successful identity verification.
 * Partial payments are allowed by default, matching the provided API behavior.
 * Zero-balance accounts are closed without collecting payment unless policy configuration changes.
-* The payment API validates card format, CVV, expiry, and balance, but not identity.
+* Local schemas validate payment amount and card structure before payment processing; the payment API may still reject card, CVV, expiry, amount, balance, or service-level failures.
 * The payment API does not persist balance updates after a successful payment.
 * Terminal service failures are closed safely to avoid ambiguous payment retries.
 * Raw card number and CVV are cleared after success, terminal failure, cancellation, or closure.
