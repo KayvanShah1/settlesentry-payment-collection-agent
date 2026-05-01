@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import argparse
 import os
 import re
 import time
-from argparse import BooleanOptionalAction
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -34,6 +32,7 @@ from settlesentry.integrations.payments.schemas import (
     PaymentResult,
     PaymentsAPIErrorCode,
 )
+import typer
 from tqdm.auto import tqdm
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1233,75 +1232,55 @@ def to_repo_relative(path: Path) -> str:
         return str(path)
 
 
-def parse_args() -> argparse.Namespace:
-    # Exhaustive mode is opt-in to avoid expensive default runs.
-    parser = argparse.ArgumentParser(description="Run scenario-based SettleSentry evaluation.")
-    parser.add_argument(
-        "--all",
-        action=BooleanOptionalAction,
-        default=True,
+def main(
+    run_all: bool = typer.Option(
+        True,
+        "--all/--no-all",
         help="Run all available modes. Enabled by default. Use --no-all with --mode for a single mode.",
-    )
-    parser.add_argument(
+    ),
+    mode: EvalMode = typer.Option(
+        EvalMode.LOCAL,
         "--mode",
-        choices=["local", "llm", "full-llm"],
-        default="local",
+        case_sensitive=False,
         help="Single mode to evaluate when --no-all is used.",
-    )
-    parser.add_argument(
+    ),
+    repeats: int = typer.Option(
+        EVALUATOR_CONFIG.local_repeats_default,
         "--repeats",
-        type=int,
-        default=EVALUATOR_CONFIG.local_repeats_default,
+        min=1,
         help="Repeats for local mode.",
-    )
-    parser.add_argument(
+    ),
+    llm_repeats: int = typer.Option(
+        EVALUATOR_CONFIG.llm_repeats_default,
         "--llm-repeats",
-        type=int,
-        default=EVALUATOR_CONFIG.llm_repeats_default,
+        min=1,
         help="Repeats for llm and full-llm modes.",
-    )
-    parser.add_argument(
+    ),
+    scenario_retries: int = typer.Option(
+        EVALUATOR_CONFIG.scenario_retries_default,
         "--scenario-retries",
-        type=int,
-        default=EVALUATOR_CONFIG.scenario_retries_default,
+        min=1,
         help="Retry attempts per scenario run. Retries are visible in the report.",
-    )
-    parser.add_argument(
-        "--exhaustive",
-        action=BooleanOptionalAction,
-        default=False,
+    ),
+    exhaustive: bool = typer.Option(
+        False,
+        "--exhaustive/--no-exhaustive",
         help="Run every scenario for every selected mode. Disabled by default to avoid excessive LLM calls.",
-    )
-
-    args = parser.parse_args()
-
-    if args.repeats < 1:
-        raise SystemExit("--repeats must be >= 1")
-
-    if args.llm_repeats < 1:
-        raise SystemExit("--llm-repeats must be >= 1")
-
-    if args.scenario_retries < 1:
-        raise SystemExit("--scenario-retries must be >= 1")
-
-    return args
-
-
-def main() -> None:
-    args = parse_args()
-    modes = resolve_modes(run_all=args.all, requested_mode=args.mode)
+    ),
+) -> None:
+    modes = resolve_modes(run_all=run_all, requested_mode=mode.value)
 
     results: list[ScenarioResult] = []
 
     for mode in modes:
-        repeats = args.llm_repeats if mode in {EvalMode.LLM, EvalMode.FULL_LLM} else args.repeats
+        mode_repeats = llm_repeats if mode in {EvalMode.LLM, EvalMode.FULL_LLM} else repeats
 
         mode_scenarios = scenarios_for_mode(
             mode=mode,
-            exhaustive=args.exhaustive,
+            exhaustive=exhaustive,
         )
 
-        mode_total_runs = len(mode_scenarios) * repeats
+        mode_total_runs = len(mode_scenarios) * mode_repeats
         CONSOLE.print(f"Running {mode_total_runs} scenarios for mode {mode.value}")
 
         with tqdm(
@@ -1310,7 +1289,7 @@ def main() -> None:
             unit="scenario",
             leave=False,
         ) as progress:
-            for repeat_index in range(1, repeats + 1):
+            for repeat_index in range(1, mode_repeats + 1):
                 for scenario in mode_scenarios:
                     progress.set_postfix_str(f"{scenario.name} (repeat {repeat_index})")
                     results.append(
@@ -1318,7 +1297,7 @@ def main() -> None:
                             scenario=scenario,
                             mode=mode,
                             repeat_index=repeat_index,
-                            max_attempts=args.scenario_retries,
+                            max_attempts=scenario_retries,
                         )
                     )
                     progress.update(1)
@@ -1339,10 +1318,10 @@ def main() -> None:
         fallback_reason=fallback_reason,
         fallback_metrics=fallback_metrics,
         modes=modes,
-        exhaustive=args.exhaustive,
-        repeats=args.repeats,
-        llm_repeats=args.llm_repeats,
-        scenario_retries=args.scenario_retries,
+        exhaustive=exhaustive,
+        repeats=repeats,
+        llm_repeats=llm_repeats,
+        scenario_retries=scenario_retries,
     )
 
     print_summary(results, metrics)
@@ -1354,4 +1333,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    typer.run(main)
