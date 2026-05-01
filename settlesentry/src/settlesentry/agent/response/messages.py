@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
@@ -58,170 +59,23 @@ DETERMINISTIC_STATUSES = {
     "cancelled",
 }
 
+LOWER_AMOUNT_PROMPT = "Please share a lower payment amount in INR."
+NO_PAYMENT_PROCESSED = "No payment has been processed."
+CONVERSATION_CLOSED = "This conversation is now closed."
+UNSAFE_PAYMENT_CONTINUE = "I cannot safely continue this payment in the chat."
 
-def build_fallback_response(context: ResponseContext) -> str:
-    status = context.status
+PAYMENT_UNAVAILABLE_MESSAGE = (
+    "The payment service is currently unavailable or the request timed out. "
+    f"{UNSAFE_PAYMENT_CONTINUE} Please try again later."
+)
 
-    if status == "greeting":
-        # Greeting is deterministic so every mode clearly introduces SettleSentry
-        # and asks for account ID.
-        return "Hello, I’m SettleSentry. I help with account verification and payment. Please share your account ID."
-
-    if status == "ask_agent_identity":
-        return append_pending_question(
-            "I’m SettleSentry, a payment assistant that helps with account verification and payment.",
-            context,
-        )
-
-    if status == "ask_agent_capability":
-        return append_pending_question(
-            (
-                "I’ll help you verify your account, show the outstanding balance, collect payment details, "
-                "ask for confirmation, and process the payment only after you confirm."
-            ),
-            context,
-        )
-
-    if status == "ask_current_status":
-        return append_pending_question(build_status_summary(context), context)
-
-    if status == "ask_to_repeat":
-        return pending_question(context)
-
-    if status == "correction_requested":
-        return (
-            "Sure. Which detail would you like to correct: account ID, full name, verification factor, "
-            "payment amount, or card details?"
-        )
-
-    if status == "correction_applied":
-        pending = pending_question(context)
-        return f"Updated. {pending}" if pending else "Updated."
-
-    if status == "account_not_found":
-        # Account-not-found is user-fixable; ask for a corrected ID without
-        # implying payment failure.
-        return "I could not find an account for that account ID. Please check it and share the correct account ID."
-
-    if status == "account_lookup_failed":
-        return "I could not look up that account right now. Please re-enter your account ID."
-
-    if status == "amount_exceeds_balance":
-        return "The payment amount cannot exceed the outstanding balance. Please share a lower payment amount in INR."
-
-    if status == "amount_exceeds_policy_limit":
-        return "The payment amount exceeds the configured policy limit. Please share a lower payment amount in INR."
-
-    if status == "invalid_payment_amount":
-        return "Payment amount must be greater than zero. Please share a valid payment amount in INR."
-
-    if status == "partial_payment_not_allowed":
-        return "Partial payments are not allowed for this account. Please share the full outstanding amount."
-
-    if status == "insufficient_balance":
-        return "The payment amount exceeds the outstanding balance. Please share a lower payment amount in INR."
-
-    if status in {"input_captured", "invalid_user_input"}:
-        return pending_question(context)
-
-    if status == "account_loaded":
-        return "Account found. Please share your full name exactly as registered on the account."
-
-    if status == "identity_verified":
-        balance = context.facts.get("balance")
-        return (
-            f"Identity verified. Your outstanding balance is {format_amount_from_text(balance)}. "
-            "Please share the amount you would like to pay in INR."
-        )
-
-    if status == "identity_verification_failed":
-        # Failed verification tells attempts remaining but never reveals which
-        # sensitive field was expected or matched.
-        attempts_remaining = context.facts.get("attempts_remaining")
-        retry_note = ""
-
-        if attempts_remaining is not None:
-            retry_note = f" You have {attempts_remaining} verification attempt{'s' if attempts_remaining != 1 else ''} remaining."
-
-        return f"I could not verify those details.{retry_note} {pending_question(context)}"
-
-    if status == "verification_exhausted":
-        return (
-            "I’m unable to verify your identity after multiple attempts, so I can’t continue with payment collection "
-            "in this chat. No payment has been processed."
-        )
-
-    if status == "zero_balance":
-        return "Identity verified. There is no outstanding balance to pay on this account, so the payment flow is now closed."
-
-    if status == "missing_card_fields":
-        return pending_question(context)
-
-    if status == "invalid_payment_request":
-        return f"Some payment details are invalid. {pending_question(context)}"
-
-    if status == "invalid_card":
-        return "The card number appears to be invalid. Please share the full card number again."
-
-    if status == "invalid_cvv":
-        return "The CVV appears to be invalid. Please share the CVV again."
-
-    if status == "invalid_expiry":
-        return "The card expiry appears to be invalid or expired. Please share the expiry in MM/YYYY format again."
-
-    if status in {"network_error", "timeout"}:
-        # Terminal service errors close safely because payment status may be
-        # ambiguous after timeout/network failure.
-        return (
-            "The payment service is currently unavailable or the request timed out. "
-            "I cannot safely continue this payment in the chat. Please try again later."
-        )
-
-    if status in {"invalid_response", "unexpected_status", "payment_failed"}:
-        return (
-            "The payment could not be processed due to a payment service issue. "
-            "I cannot safely continue this payment in the chat."
-        )
-
-    if status == "payment_attempts_exhausted":
-        return "Payment could not be completed after multiple attempts. No payment has been processed. This conversation is now closed."
-
-    if status == "payment_ready_for_confirmation":
-        amount = format_amount_from_text(context.facts.get("amount"))
-        card_last4 = context.facts.get("card_last4") or "the provided card"
-        return (
-            f"Payment of {amount} using card ending {card_last4} is ready. Please reply yes to confirm or no to cancel."
-        )
-
-    if status == "payment_not_confirmed":
-        return "Payment has not been confirmed. Please reply yes to confirm or no to cancel."
-
-    if status == "payment_success":
-        transaction_id = context.facts.get("transaction_id") or context.safe_state.transaction_id or "not available"
-        amount = format_amount_from_text(context.facts.get("amount") or context.safe_state.payment_amount)
-        return f"Payment of {amount} was processed successfully. Transaction ID: {transaction_id}. This conversation is now closed."
-
-    if status == "conversation_closed":
-        transaction_id = context.facts.get("transaction_id") or context.safe_state.transaction_id
-
-        if transaction_id:
-            amount = format_amount_from_text(context.facts.get("payment_amount") or context.safe_state.payment_amount)
-            return f"Payment of {amount} was processed successfully. Transaction ID: {transaction_id}. This conversation is now closed."
-
-        return "This conversation is now closed. No payment has been processed."
-
-    if status == "cancelled":
-        return "Payment flow cancelled. No payment has been processed. This conversation is now closed."
-
-    if context.required_fields:
-        return pending_question(context)
-
-    return "Please provide the requested detail to continue."
+PAYMENT_SERVICE_FAILURE_MESSAGE = (
+    "The payment could not be processed due to a payment service issue. "
+    f"{UNSAFE_PAYMENT_CONTINUE}"
+)
 
 
 def pending_question(context: ResponseContext) -> str:
-    # Required fields are converted into user-facing prompts here; debug awkward
-    # prompts by checking required_fields first.
     fields = context.required_fields
 
     if not fields:
@@ -307,3 +161,138 @@ def join_labels(labels: list[str]) -> str:
         return f"{labels[0]} and {labels[1]}"
 
     return f"{', '.join(labels[:-1])}, and {labels[-1]}"
+
+
+def _ask_agent_identity(context: ResponseContext) -> str:
+    return append_pending_question(
+        "I'm SettleSentry, a payment assistant that helps with account verification and payment.",
+        context,
+    )
+
+
+def _ask_agent_capability(context: ResponseContext) -> str:
+    return append_pending_question(
+        (
+            "I'll help you verify your account, show the outstanding balance, collect payment details, "
+            "ask for confirmation, and process the payment only after you confirm."
+        ),
+        context,
+    )
+
+
+def _ask_current_status(context: ResponseContext) -> str:
+    return append_pending_question(build_status_summary(context), context)
+
+
+def _correction_applied(context: ResponseContext) -> str:
+    pending = pending_question(context)
+    return f"Updated. {pending}" if pending else "Updated."
+
+
+def _identity_verified(context: ResponseContext) -> str:
+    balance = context.facts.get("balance")
+    return (
+        f"Identity verified. Your outstanding balance is {format_amount_from_text(balance)}. "
+        "Please share the amount you would like to pay in INR."
+    )
+
+
+def _identity_verification_failed(context: ResponseContext) -> str:
+    attempts_remaining = context.facts.get("attempts_remaining")
+    retry_note = ""
+
+    if attempts_remaining is not None:
+        retry_note = f" You have {attempts_remaining} verification attempt{'s' if attempts_remaining != 1 else ''} remaining."
+
+    return f"I could not verify those details.{retry_note} {pending_question(context)}"
+
+
+def _invalid_payment_request(context: ResponseContext) -> str:
+    return f"Some payment details are invalid. {pending_question(context)}"
+
+
+def _payment_ready_for_confirmation(context: ResponseContext) -> str:
+    amount = format_amount_from_text(context.facts.get("amount"))
+    card_last4 = context.facts.get("card_last4") or "the provided card"
+    return f"Payment of {amount} using card ending {card_last4} is ready. Please reply yes to confirm or no to cancel."
+
+
+def _payment_success(context: ResponseContext) -> str:
+    transaction_id = context.facts.get("transaction_id") or context.safe_state.transaction_id or "not available"
+    amount = format_amount_from_text(context.facts.get("amount") or context.safe_state.payment_amount)
+    return f"Payment of {amount} was processed successfully. Transaction ID: {transaction_id}. {CONVERSATION_CLOSED}"
+
+
+def _conversation_closed(context: ResponseContext) -> str:
+    transaction_id = context.facts.get("transaction_id") or context.safe_state.transaction_id
+
+    if transaction_id:
+        amount = format_amount_from_text(context.facts.get("payment_amount") or context.safe_state.payment_amount)
+        return f"Payment of {amount} was processed successfully. Transaction ID: {transaction_id}. {CONVERSATION_CLOSED}"
+
+    return f"{CONVERSATION_CLOSED} {NO_PAYMENT_PROCESSED}"
+
+
+STATIC_MESSAGES: dict[str, str] = {
+    "greeting": "Hello, I'm SettleSentry. I help with account verification and payment. Please share your account ID.",
+    "correction_requested": (
+        "Sure. Which detail would you like to correct: account ID, full name, verification factor, "
+        "payment amount, or card details?"
+    ),
+    "account_not_found": "I could not find an account for that account ID. Please check it and share the correct account ID.",
+    "account_lookup_failed": "I could not look up that account right now. Please re-enter your account ID.",
+    "amount_exceeds_balance": f"The payment amount cannot exceed the outstanding balance. {LOWER_AMOUNT_PROMPT}",
+    "amount_exceeds_policy_limit": f"The payment amount exceeds the configured policy limit. {LOWER_AMOUNT_PROMPT}",
+    "invalid_payment_amount": "Payment amount must be greater than zero. Please share a valid payment amount in INR.",
+    "partial_payment_not_allowed": "Partial payments are not allowed for this account. Please share the full outstanding amount.",
+    "insufficient_balance": f"The payment amount exceeds the outstanding balance. {LOWER_AMOUNT_PROMPT}",
+    "account_loaded": "Account found. Please share your full name exactly as registered on the account.",
+    "verification_exhausted": (
+        "I'm unable to verify your identity after multiple attempts, so I can't continue with payment collection "
+        f"in this chat. {NO_PAYMENT_PROCESSED}"
+    ),
+    "zero_balance": "Identity verified. There is no outstanding balance to pay on this account, so the payment flow is now closed.",
+    "invalid_card": "The card number appears to be invalid. Please share the full card number again.",
+    "invalid_cvv": "The CVV appears to be invalid. Please share the CVV again.",
+    "invalid_expiry": "The card expiry appears to be invalid or expired. Please share the expiry in MM/YYYY format again.",
+    "network_error": PAYMENT_UNAVAILABLE_MESSAGE,
+    "timeout": PAYMENT_UNAVAILABLE_MESSAGE,
+    "invalid_response": PAYMENT_SERVICE_FAILURE_MESSAGE,
+    "unexpected_status": PAYMENT_SERVICE_FAILURE_MESSAGE,
+    "payment_failed": PAYMENT_SERVICE_FAILURE_MESSAGE,
+    "payment_attempts_exhausted": f"Payment could not be completed after multiple attempts. {NO_PAYMENT_PROCESSED} {CONVERSATION_CLOSED}",
+    "payment_not_confirmed": "Payment has not been confirmed. Please reply yes to confirm or no to cancel.",
+    "cancelled": f"Payment flow cancelled. {NO_PAYMENT_PROCESSED} {CONVERSATION_CLOSED}",
+}
+
+MESSAGE_BUILDERS: dict[str, Callable[[ResponseContext], str]] = {
+    "ask_agent_identity": _ask_agent_identity,
+    "ask_agent_capability": _ask_agent_capability,
+    "ask_current_status": _ask_current_status,
+    "ask_to_repeat": pending_question,
+    "correction_applied": _correction_applied,
+    "input_captured": pending_question,
+    "invalid_user_input": pending_question,
+    "identity_verified": _identity_verified,
+    "identity_verification_failed": _identity_verification_failed,
+    "missing_card_fields": pending_question,
+    "invalid_payment_request": _invalid_payment_request,
+    "payment_ready_for_confirmation": _payment_ready_for_confirmation,
+    "payment_success": _payment_success,
+    "conversation_closed": _conversation_closed,
+}
+
+
+def build_fallback_response(context: ResponseContext) -> str:
+    static_message = STATIC_MESSAGES.get(context.status)
+    if static_message is not None:
+        return static_message
+
+    builder = MESSAGE_BUILDERS.get(context.status)
+    if builder is not None:
+        return builder(context)
+
+    if context.required_fields:
+        return pending_question(context)
+
+    return "Please provide the requested detail to continue."
