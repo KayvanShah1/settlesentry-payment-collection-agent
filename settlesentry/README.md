@@ -14,6 +14,7 @@ settlesentry/
     settlesentry/
       agent/                      # Conversational agent implementation
         interface.py              # Public Agent interface (Agent.next)
+        contracts.py              # Shared public/LLM message response contract
         deps.py                   # Session-scoped runtime dependencies
         actions.py                # Parser intent/proposed-action enums
         workflow/
@@ -34,7 +35,7 @@ settlesentry/
         response/
           messages.py             # Deterministic response message helpers
           prompts.py              # Responder prompts
-          writer.py               # Deterministic/LLM response generators
+          writer.py               # Response writer factory and optional LLM response writer
         policy/
           models.py               # Policy models (decision/reason/ruleset)
           rules.py                # Policy rule functions

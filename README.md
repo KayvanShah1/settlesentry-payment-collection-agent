@@ -24,7 +24,7 @@ Payment collection is a high-risk conversational workflow. The agent must mainta
 
 A free-form chatbot alone is not sufficient for this problem. SettleSentry separates language understanding from payment authority: the LLM may help interpret or phrase messages, but it does not verify identity, authorize payment, decide balance disclosure, or call payment APIs directly.
 
-![Illustration Stock Photo](docs/img/stock_image.jpg)
+![SettleSentry payment workflow illustration](docs/img/stock_image.jpg)
 
 ## Core Capabilities
 
