@@ -14,10 +14,20 @@ from typing import Callable
 # Suppress app console logs during evaluator runs.
 os.environ["LOG_CONSOLE_ENABLED"] = "false"
 
+import typer
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from rich import box as rich_box
 from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from rich.table import Table
 from settlesentry.agent.interface import Agent
 from settlesentry.agent.parsing.deterministic import DeterministicInputParser
@@ -32,8 +42,6 @@ from settlesentry.integrations.payments.schemas import (
     PaymentResult,
     PaymentsAPIErrorCode,
 )
-import typer
-from tqdm.auto import tqdm
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = REPO_ROOT / "var" / "evaluation"
@@ -1012,10 +1020,10 @@ def aggregate_metrics(results: list[ScenarioResult]) -> dict:
     for stats in by_category.values():
         stats["success_rate"] = stats["passed"] / stats["total"] if stats["total"] else 0.0
 
-    def rate(metric_name: str) -> float:
+    def rate(metric_name: str) -> float | None:
         eligible = [result for result in results if metric_name in result.metrics]
         if not eligible:
-            return 0.0
+            return None
 
         return sum(int(result.metrics.get(metric_name, 0)) for result in eligible) / len(eligible)
 
@@ -1105,6 +1113,11 @@ def build_scenario_results_table(results: list[ScenarioResult], *, ascii_only: b
 
 
 def build_overall_metrics_table(metrics: dict, *, ascii_only: bool = False) -> Table:
+    def format_rate(value: float | None) -> str:
+        if value is None:
+            return "N/A"
+        return f"{value:.2%}"
+
     metrics_table = Table(
         title="Overall Metrics",
         box=rich_box.ASCII if ascii_only else rich_box.HEAVY_HEAD,
@@ -1116,19 +1129,19 @@ def build_overall_metrics_table(metrics: dict, *, ascii_only: bool = False) -> T
     metrics_table.add_row("passed_runs", f"{metrics['passed_runs']}/{metrics['total_runs']}")
     metrics_table.add_row("total_wall_time_seconds", f"{metrics['total_wall_time_seconds']:.2f}s")
     metrics_table.add_row("average_wall_time_seconds", f"{metrics['average_wall_time_seconds']:.2f}s")
-    metrics_table.add_row("interface_compliance_rate", f"{metrics['interface_compliance_rate']:.2%}")
+    metrics_table.add_row("interface_compliance_rate", format_rate(metrics["interface_compliance_rate"]))
     metrics_table.add_row("privacy_leak_count", str(metrics["privacy_leak_count"]))
     metrics_table.add_row("premature_payment_calls", str(metrics["premature_payment_calls"]))
     metrics_table.add_row("total_lookup_calls", str(metrics["total_lookup_calls"]))
     metrics_table.add_row("total_payment_calls", str(metrics["total_payment_calls"]))
     metrics_table.add_row("average_turns_per_run", f"{metrics['average_turns_per_run']:.2f}")
-    metrics_table.add_row("clear_error_message_rate", f"{metrics['clear_error_message_rate']:.2%}")
-    metrics_table.add_row("graceful_close_rate", f"{metrics['graceful_close_rate']:.2%}")
-    metrics_table.add_row("amount_guardrail_success_rate", f"{metrics['amount_guardrail_success_rate']:.2%}")
-    metrics_table.add_row("correction_success_rate", f"{metrics['correction_success_rate']:.2%}")
-    metrics_table.add_row("recovery_success_rate", f"{metrics['recovery_success_rate']:.2%}")
-    metrics_table.add_row("payment_recovery_success_rate", f"{metrics['payment_recovery_success_rate']:.2%}")
-    metrics_table.add_row("confirmation_gate_success_rate", f"{metrics['confirmation_gate_success_rate']:.2%}")
+    metrics_table.add_row("clear_error_message_rate", format_rate(metrics["clear_error_message_rate"]))
+    metrics_table.add_row("graceful_close_rate", format_rate(metrics["graceful_close_rate"]))
+    metrics_table.add_row("amount_guardrail_success_rate", format_rate(metrics["amount_guardrail_success_rate"]))
+    metrics_table.add_row("correction_success_rate", format_rate(metrics["correction_success_rate"]))
+    metrics_table.add_row("recovery_success_rate", format_rate(metrics["recovery_success_rate"]))
+    metrics_table.add_row("payment_recovery_success_rate", format_rate(metrics["payment_recovery_success_rate"]))
+    metrics_table.add_row("confirmation_gate_success_rate", format_rate(metrics["confirmation_gate_success_rate"]))
 
     return metrics_table
 
@@ -1283,15 +1296,29 @@ def main(
         mode_total_runs = len(mode_scenarios) * mode_repeats
         CONSOLE.print(f"Running {mode_total_runs} scenarios for mode {mode.value}")
 
-        with tqdm(
-            total=mode_total_runs,
-            desc=f"mode={mode.value}",
-            unit="scenario",
-            leave=False,
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            TextColumn("{task.fields[current_run]}"),
+            console=CONSOLE,
+            transient=True,
         ) as progress:
+            task_id = progress.add_task(
+                description=f"mode={mode.value}",
+                total=mode_total_runs,
+                current_run="",
+            )
+
             for repeat_index in range(1, mode_repeats + 1):
                 for scenario in mode_scenarios:
-                    progress.set_postfix_str(f"{scenario.name} (repeat {repeat_index})")
+                    progress.update(
+                        task_id,
+                        current_run=f"{scenario.name} (repeat {repeat_index})",
+                    )
                     results.append(
                         run_scenario_with_retries(
                             scenario=scenario,
@@ -1300,7 +1327,7 @@ def main(
                             max_attempts=scenario_retries,
                         )
                     )
-                    progress.update(1)
+                    progress.advance(task_id, 1)
 
     fallback_ok, fallback_reason, fallback_metrics = run_fallback_smoke_checks()
     print_fallback_summary(fallback_ok, fallback_reason, fallback_metrics)
