@@ -142,7 +142,7 @@ The language understanding layer extracts useful structure from user messages, s
 
 This layer can be deterministic or LLM-assisted. In both cases, extracted information is treated as user-provided input, not as authorization.
 
-The parser may extract multiple fields from a single message, especially in LLM-assisted modes. Before merging into conversation state, the workflow keeps only fields that are expected for the current step, except for explicit correction flows. This prevents a pasted account record or unrelated structured text from skipping verification steps or advancing the payment flow prematurely.
+The parser may extract multiple fields from a single message, especially in LLM-assisted modes. Extracted fields are stored as user-provided input, while deterministic workflow and policy gates decide when account lookup, identity verification, balance disclosure, payment preparation, confirmation, and payment processing may occur. This allows the agent to handle out-of-order information without giving the parser authority to skip payment-critical controls.
 
 ### Response Layer
 

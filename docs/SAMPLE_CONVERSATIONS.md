@@ -327,23 +327,7 @@ USER: 1990-05-14
 AGENT: Identity verified. Your outstanding balance is INR 1250.75. Please share the amount you would like to pay in INR.
 ```
 
-## 14. Structured Input Does Not Skip Verification
-
-```text
-USER: Hi
-AGENT: Hello, I'm SettleSentry. I help with account verification and payment. Please share your account ID.
-
-USER: ACC1001
-AGENT: Account found. Please share your full name exactly as registered on the account.
-
-USER: "account_id": "ACC1001", "full_name": "Nithin Jain", "dob": "1990-05-14", "aadhaar_last4": "4321", "pincode": "400001"
-AGENT: Please share your one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
-
-USER: 1990-05-14
-AGENT: Identity verified. Your outstanding balance is INR 1250.75. Please share the amount you would like to pay in INR.
-```
-
-## 15. Correct Name With Wrong Verification Factor
+## 14. Correct Name With Wrong Verification Factor
 
 ```text
 USER: Hi
@@ -362,7 +346,7 @@ USER: 400001
 AGENT: Identity verified. Your outstanding balance is INR 1250.75. Please share the amount you would like to pay in INR.
 ```
 
-## 16. Payment Attempts Exhausted
+## 15. Payment Attempts Exhausted
 
 ```text
 USER: Hi

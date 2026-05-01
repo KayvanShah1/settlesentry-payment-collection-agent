@@ -116,7 +116,7 @@ Coverage:
 - corrections to account, identity, amount, or card details,
 - cancellation,
 - zero-balance account behavior.
-- expected-field filtering when users paste structured or multi-field input at the wrong step
+- out-of-order or multi-field user input before the corresponding prompt
 
 Expected result:
 
@@ -124,7 +124,7 @@ Expected result:
 - corrections reset only the affected downstream context,
 - cancellation closes the conversation,
 - zero-balance accounts do not proceed to payment unless policy allows.
-- only fields expected for the current step are merged unless the user is explicitly correcting previous details
+- volunteered information is remembered without bypassing account lookup, identity verification, payment validation, or explicit confirmation gates
 
 ## Evaluation Matrix
 
