@@ -99,7 +99,7 @@ def build_response_writer() -> ResponseWriter:
             return PydanticAIResponseWriter()
         except Exception as exc:
             logger.warning(
-                "llm_responder_disabled_fallback",
+                "llm_response_writer_disabled_fallback",
                 extra={"error_type": type(exc).__name__},
             )
 
