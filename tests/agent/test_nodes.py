@@ -4,14 +4,14 @@ from decimal import Decimal
 
 from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.response.messages import build_fallback_response
-from settlesentry.agent.workflow.nodes import (
+from settlesentry.agent.workflow.helpers import response_context
+from settlesentry.agent.workflow.input import submit_user_input
+from settlesentry.agent.workflow.operations import (
     confirm_payment,
     lookup_account,
     prepare_payment,
     process_payment,
     recap_and_close,
-    response_context,
-    submit_user_input,
     verify_identity,
 )
 from settlesentry.agent.parsing.deterministic import DeterministicInputParser
