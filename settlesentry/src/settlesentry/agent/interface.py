@@ -7,7 +7,7 @@ from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.parsing.base import InputParser
 from settlesentry.agent.response.messages import ResponseContext, build_fallback_response, format_amount
 from settlesentry.agent.response.writer import ResponseWriter
-from settlesentry.agent.state import ConversationState, ConversationStep
+from settlesentry.agent.state import ConversationState
 from settlesentry.agent.workflow.graph import build_payment_graph
 from settlesentry.core import OperationLogContext, get_logger
 from settlesentry.integrations.payments.client import PaymentsClient
@@ -65,11 +65,6 @@ class Agent:
         if self.state.completed:
             return MessageResponse(message=self._closed_response()).model_dump()
 
-        # Payment success is finalized on the next turn to return a stable final recap
-        # and then close the session.
-        if self.state.step == ConversationStep.PAYMENT_SUCCESS:
-            return MessageResponse(message=self._finalize_success_response()).model_dump()
-
         operation = OperationLogContext(operation="agent_turn")
         step_before = self.state.step
 
@@ -113,18 +108,6 @@ class Agent:
         )
 
         return response.model_dump()
-
-    def _finalize_success_response(self) -> str:
-        amount = format_amount(self.state.payment_amount)
-        transaction_id = self.state.transaction_id or "not available"
-
-        self.state.mark_closed()
-
-        return (
-            f"Payment of {amount} was processed successfully. "
-            f"Transaction ID: {transaction_id}. "
-            "This conversation is now closed."
-        )
 
     def _closed_response(self) -> str:
         if self.state.transaction_id:
