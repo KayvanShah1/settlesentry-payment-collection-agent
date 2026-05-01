@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from settlesentry.agent.interface import Agent
 from settlesentry.agent.parsing.deterministic import DeterministicInputParser
-from settlesentry.agent.response.writer import DeterministicResponseGenerator
+from settlesentry.agent.response.messages import build_fallback_response
 from settlesentry.agent.state import ConversationStep
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,
@@ -49,7 +49,7 @@ def make_agent() -> Agent:
     return Agent(
         payments_client=FakePaymentsClient(),
         parser=DeterministicInputParser(),
-        responder=DeterministicResponseGenerator(),
+        responder=build_fallback_response,
         grouped_card_collection=False,
     )
 

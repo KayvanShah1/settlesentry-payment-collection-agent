@@ -15,7 +15,6 @@ from settlesentry.agent.workflow.operations import (
     verify_identity,
 )
 from settlesentry.agent.parsing.deterministic import DeterministicInputParser
-from settlesentry.agent.response.writer import DeterministicResponseGenerator
 from settlesentry.agent.state import ConversationStep
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,
@@ -80,7 +79,7 @@ def make_deps(payments_client=None) -> AgentDeps:
     return AgentDeps(
         payments_client=payments_client or FakePaymentsClient(),
         parser=DeterministicInputParser(),
-        responder=DeterministicResponseGenerator(),
+        responder=build_fallback_response,
         grouped_card_collection=False,
     )
 
