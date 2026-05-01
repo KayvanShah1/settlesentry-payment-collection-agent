@@ -1,25 +1,32 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import time
 from argparse import BooleanOptionalAction
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from io import StringIO
 from pathlib import Path
 from typing import Callable
 
-os.environ.setdefault("LOG_CONSOLE_ENABLED", "false")
+# Force evaluator runs to suppress app console logs (same intent as CLI's
+# configure_console_logging with debug disabled).
+os.environ["LOG_CONSOLE_ENABLED"] = "false"
 
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from rich import box as rich_box
 from rich.console import Console
 from rich.table import Table
 from settlesentry.agent.interface import Agent
 from settlesentry.agent.parsing.deterministic import DeterministicInputParser
-from settlesentry.agent.parsing.factory import build_input_parser
+from settlesentry.agent.parsing.factory import CombinedInputParser, build_input_parser
 from settlesentry.agent.response.writer import (
+    CombinedResponseGenerator,
     DeterministicResponseGenerator,
     build_response_generator,
 )
@@ -31,10 +38,57 @@ from settlesentry.integrations.payments.schemas import (
     PaymentResult,
     PaymentsAPIErrorCode,
 )
+from tqdm.auto import tqdm
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = REPO_ROOT / "var" / "evaluation"
-CONSOLE = Console()
+CONSOLE = Console(legacy_windows=False)
+
+
+class EvaluatorConfig(BaseSettings):
+    report_retention: int = Field(default=3, ge=1, le=50)
+    local_repeats_default: int = Field(default=1, ge=1, le=20)
+    llm_repeats_default: int = Field(default=1, ge=1, le=20)
+    scenario_retries_default: int = Field(default=1, ge=1, le=10)
+    report_width: int = Field(default=160, ge=80, le=300)
+
+    model_config = SettingsConfigDict(
+        env_file=REPO_ROOT / ".env",
+        env_file_encoding="utf-8",
+        env_prefix="EVAL_",
+        extra="ignore",
+    )
+
+
+EVALUATOR_CONFIG = EvaluatorConfig()
+EVALUATION_REPORT_RETENTION = EVALUATOR_CONFIG.report_retention
+
+SAMPLE_ACCOUNTS = {
+    "ACC1001": AccountDetails(
+        account_id="ACC1001",
+        full_name="Nithin Jain",
+        dob="1990-05-14",
+        aadhaar_last4="4321",
+        pincode="400001",
+        balance=Decimal("1250.75"),
+    ),
+    "ACC1002": AccountDetails(
+        account_id="ACC1002",
+        full_name="Asha Mehta",
+        dob="1988-03-22",
+        aadhaar_last4="9876",
+        pincode="400002",
+        balance=Decimal("1250.75"),
+    ),
+    "ACC1003": AccountDetails(
+        account_id="ACC1003",
+        full_name="Priya Agarwal",
+        dob="1992-08-10",
+        aadhaar_last4="2468",
+        pincode="400003",
+        balance=Decimal("0.00"),
+    ),
+}
 
 
 class EvalMode(StrEnum):
@@ -58,34 +112,7 @@ class SpyPaymentsClient:
     def lookup_account(self, account_id: str) -> LookupResult:
         self.lookup_calls.append(account_id)
 
-        accounts = {
-            "ACC1001": AccountDetails(
-                account_id="ACC1001",
-                full_name="Nithin Jain",
-                dob="1990-05-14",
-                aadhaar_last4="4321",
-                pincode="400001",
-                balance=Decimal("1250.75"),
-            ),
-            "ACC1002": AccountDetails(
-                account_id="ACC1002",
-                full_name="Asha Mehta",
-                dob="1988-03-22",
-                aadhaar_last4="9876",
-                pincode="400002",
-                balance=Decimal("1250.75"),
-            ),
-            "ACC1003": AccountDetails(
-                account_id="ACC1003",
-                full_name="Priya Agarwal",
-                dob="1992-08-10",
-                aadhaar_last4="2468",
-                pincode="400003",
-                balance=Decimal("0.00"),
-            ),
-        }
-
-        account = accounts.get(account_id)
+        account = SAMPLE_ACCOUNTS.get(account_id)
 
         if account is None:
             return LookupResult(
@@ -110,6 +137,37 @@ class SpyPaymentsClient:
             return self.payment_outcomes[len(self.payment_calls) - 1]
 
         return self.payment_outcomes[-1]
+
+
+def invalid_card_result() -> PaymentResult:
+    return PaymentResult(
+        ok=False,
+        error_code=PaymentsAPIErrorCode.INVALID_CARD,
+        message="The card number appears to be invalid.",
+        status_code=422,
+    )
+
+
+class FailingInputParser:
+    """
+    Test double that simulates an LLM/parser provider failure.
+
+    Used only by evaluator fallback smoke checks.
+    """
+
+    def extract(self, user_input, context=None):
+        raise RuntimeError("simulated parser failure")
+
+
+class FailingResponseGenerator:
+    """
+    Test double that simulates an LLM response-writer failure.
+
+    Used only by evaluator fallback smoke checks.
+    """
+
+    def generate(self, context):
+        raise RuntimeError("simulated response failure")
 
 
 @dataclass
@@ -364,6 +422,66 @@ def run_scenario_with_retries(
     return last_result
 
 
+def run_fallback_smoke_checks() -> tuple[bool, str, dict]:
+    """
+    Force parser and response-writer failures and verify deterministic fallbacks.
+
+    This is intentionally small. The main scenario matrix already checks business
+    behavior; this only proves that fallback wiring survives provider failures.
+    """
+    client = SpyPaymentsClient()
+
+    parser = CombinedInputParser(
+        primary=FailingInputParser(),
+        fallback=DeterministicInputParser(),
+    )
+
+    responder = CombinedResponseGenerator(
+        primary=FailingResponseGenerator(),
+        fallback=DeterministicResponseGenerator(),
+    )
+
+    agent = Agent(
+        payments_client=client,
+        parser=parser,
+        responder=responder,
+        grouped_card_collection=False,
+    )
+
+    response = agent.next("Hi")
+
+    response_shape_ok = isinstance(response, dict) and set(response.keys()) == {"message"}
+    message = response.get("message", "") if response_shape_ok else ""
+
+    parser_fallback_ok = response_shape_ok and isinstance(message, str) and "account id" in message.lower()
+    response_fallback_ok = parser_fallback_ok and agent.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID
+
+    ok = parser_fallback_ok and response_fallback_ok
+
+    return (
+        ok,
+        "passed" if ok else "fallback smoke check failed",
+        {
+            "fallback_smoke_success": int(ok),
+            "parser_fallback_ok": int(parser_fallback_ok),
+            "response_fallback_ok": int(response_fallback_ok),
+            "response_shape_ok": int(response_shape_ok),
+        },
+    )
+
+
+def assertion_result(
+    ok: bool,
+    failure_reason: str,
+    **metrics: int | float | bool | str,
+) -> tuple[bool, str, dict]:
+    return (
+        ok,
+        "passed" if ok else failure_reason,
+        {"scenario_success": int(ok), **metrics},
+    )
+
+
 # Assertions define business correctness for each scenario: final state, tool
 # calls, no privacy leak, no premature payment.
 def assert_happy_path(agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]) -> tuple[bool, str, dict]:
@@ -375,16 +493,11 @@ def assert_happy_path(agent: Agent, client: SpyPaymentsClient, records: list[Tur
         and client.payment_calls[0]["amount"] == "500"
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "happy path did not complete correctly",
-        {
-            "scenario_success": int(ok),
-            "tool_call_correctness": int(len(client.lookup_calls) == 1 and len(client.payment_calls) == 1),
-            "partial_payment_supported": int(
-                client.payment_calls[0]["amount"] == "500" if client.payment_calls else False
-            ),
-        },
+        "happy path did not complete correctly",
+        tool_call_correctness=int(len(client.lookup_calls) == 1 and len(client.payment_calls) == 1),
+        partial_payment_supported=int(client.payment_calls[0]["amount"] == "500" if client.payment_calls else False),
     )
 
 
@@ -398,13 +511,10 @@ def assert_full_balance_payment(
         and client.payment_calls[0]["amount"] == "1250.75"
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "full balance payment failed",
-        {
-            "scenario_success": int(ok),
-            "tool_call_correctness": int(len(client.lookup_calls) == 1 and len(client.payment_calls) == 1),
-        },
+        "full balance payment failed",
+        tool_call_correctness=int(len(client.lookup_calls) == 1 and len(client.payment_calls) == 1),
     )
 
 
@@ -421,16 +531,13 @@ def assert_account_not_found_recovery(
         and has_clear_error
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "account-not-found recovery failed",
-        {
-            "scenario_success": int(ok),
-            "recovery_success": int(ok),
-            "clear_error_message": int(has_clear_error),
-            "lookup_calls": len(client.lookup_calls),
-            "payment_calls": len(client.payment_calls),
-        },
+        "account-not-found recovery failed",
+        recovery_success=int(ok),
+        clear_error_message=int(has_clear_error),
+        lookup_calls=len(client.lookup_calls),
+        payment_calls=len(client.payment_calls),
     )
 
 
@@ -447,15 +554,12 @@ def assert_amount_exceeds_balance(
         and has_clear_error
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "amount > balance was not blocked before card collection",
-        {
-            "scenario_success": int(ok),
-            "amount_guardrail_success": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-            "clear_error_message": int(has_clear_error),
-        },
+        "amount > balance was not blocked before card collection",
+        amount_guardrail_success=int(ok),
+        premature_payment_calls=len(client.payment_calls),
+        clear_error_message=int(has_clear_error),
     )
 
 
@@ -469,14 +573,11 @@ def assert_verification_recovery(
         and agent.state.step == ConversationStep.WAITING_FOR_PAYMENT_AMOUNT
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "verification recovery failed",
-        {
-            "scenario_success": int(ok),
-            "recovery_success": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-        },
+        "verification recovery failed",
+        recovery_success=int(ok),
+        premature_payment_calls=len(client.payment_calls),
     )
 
 
@@ -492,14 +593,11 @@ def assert_secondary_factor_recovery(
         and len(client.payment_calls) == 0
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "secondary-factor recovery failed",
-        {
-            "scenario_success": int(ok),
-            "recovery_success": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-        },
+        "secondary-factor recovery failed",
+        recovery_success=int(ok),
+        premature_payment_calls=len(client.payment_calls),
     )
 
 
@@ -513,14 +611,11 @@ def assert_verification_exhaustion(
         and len(client.payment_calls) == 0
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "verification exhaustion did not close safely",
-        {
-            "scenario_success": int(ok),
-            "graceful_close": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-        },
+        "verification exhaustion did not close safely",
+        graceful_close=int(ok),
+        premature_payment_calls=len(client.payment_calls),
     )
 
 
@@ -534,15 +629,12 @@ def assert_zero_balance(agent: Agent, client: SpyPaymentsClient, records: list[T
         and has_zero_balance_message
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "zero balance did not close safely",
-        {
-            "scenario_success": int(ok),
-            "graceful_close": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-            "clear_error_message": int(has_zero_balance_message),
-        },
+        "zero balance did not close safely",
+        graceful_close=int(ok),
+        premature_payment_calls=len(client.payment_calls),
+        clear_error_message=int(has_zero_balance_message),
     )
 
 
@@ -557,13 +649,10 @@ def assert_side_question_state_preserved(
         and len(client.payment_calls) == 0
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "side question changed workflow state incorrectly",
-        {
-            "scenario_success": int(ok),
-            "side_question_state_preserved": int(ok),
-        },
+        "side question changed workflow state incorrectly",
+        side_question_state_preserved=int(ok),
     )
 
 
@@ -576,14 +665,11 @@ def assert_no_confirmation_no_payment(
         and len(client.payment_calls) == 0
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "payment was processed without confirmation",
-        {
-            "scenario_success": int(ok),
-            "confirmation_gate_success": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-        },
+        "payment was processed without confirmation",
+        confirmation_gate_success=int(ok),
+        premature_payment_calls=len(client.payment_calls),
     )
 
 
@@ -592,14 +678,11 @@ def assert_cancel_at_confirmation(
 ) -> tuple[bool, str, dict]:
     ok = agent.state.completed and agent.state.step == ConversationStep.CLOSED and len(client.payment_calls) == 0
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "cancel did not close safely before payment",
-        {
-            "scenario_success": int(ok),
-            "graceful_close": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-        },
+        "cancel did not close safely before payment",
+        graceful_close=int(ok),
+        premature_payment_calls=len(client.payment_calls),
     )
 
 
@@ -613,14 +696,11 @@ def assert_valid_amount_correction(
         and len(client.payment_calls) == 0
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "valid amount correction did not reset confirmation and reprepare",
-        {
-            "scenario_success": int(ok),
-            "correction_success": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-        },
+        "valid amount correction did not reset confirmation and reprepare",
+        correction_success=int(ok),
+        premature_payment_calls=len(client.payment_calls),
     )
 
 
@@ -637,15 +717,12 @@ def assert_invalid_amount_correction(
         and has_clear_error
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "invalid corrected amount was not blocked",
-        {
-            "scenario_success": int(ok),
-            "correction_success": int(ok),
-            "amount_guardrail_success": int(ok),
-            "premature_payment_calls": len(client.payment_calls),
-        },
+        "invalid corrected amount was not blocked",
+        correction_success=int(ok),
+        amount_guardrail_success=int(ok),
+        premature_payment_calls=len(client.payment_calls),
     )
 
 
@@ -663,15 +740,12 @@ def assert_payment_failure_recovery(
         and has_invalid_card_message
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "payment failure recovery failed",
-        {
-            "scenario_success": int(ok),
-            "payment_recovery_success": int(ok),
-            "clear_error_message": int(has_invalid_card_message),
-            "payment_calls": len(client.payment_calls),
-        },
+        "payment failure recovery failed",
+        payment_recovery_success=int(ok),
+        clear_error_message=int(has_invalid_card_message),
+        payment_calls=len(client.payment_calls),
     )
 
 
@@ -685,14 +759,11 @@ def assert_payment_attempts_exhausted(
         and len(client.payment_calls) == 3
     )
 
-    return (
+    return assertion_result(
         ok,
-        "passed" if ok else "payment attempts exhaustion did not close safely",
-        {
-            "scenario_success": int(ok),
-            "graceful_close": int(ok),
-            "payment_calls": len(client.payment_calls),
-        },
+        "payment attempts exhaustion did not close safely",
+        graceful_close=int(ok),
+        payment_calls=len(client.payment_calls),
     )
 
 
@@ -814,12 +885,7 @@ SCENARIOS = [
         BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes", "4532 0151 1283 0366", "yes"],
         assert_payment_failure_recovery,
         payment_outcomes=[
-            PaymentResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.INVALID_CARD,
-                message="The card number appears to be invalid.",
-                status_code=422,
-            ),
+            invalid_card_result(),
             PaymentResult(ok=True, transaction_id="txn_eval_success", status_code=200),
         ],
     ),
@@ -829,24 +895,9 @@ SCENARIOS = [
         BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes", "4532 0151 1283 0366", "yes", "4532 0151 1283 0366", "yes"],
         assert_payment_attempts_exhausted,
         payment_outcomes=[
-            PaymentResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.INVALID_CARD,
-                message="The card number appears to be invalid.",
-                status_code=422,
-            ),
-            PaymentResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.INVALID_CARD,
-                message="The card number appears to be invalid.",
-                status_code=422,
-            ),
-            PaymentResult(
-                ok=False,
-                error_code=PaymentsAPIErrorCode.INVALID_CARD,
-                message="The card number appears to be invalid.",
-                status_code=422,
-            ),
+            invalid_card_result(),
+            invalid_card_result(),
+            invalid_card_result(),
         ],
     ),
 ]
@@ -1000,8 +1051,11 @@ def aggregate_metrics(results: list[ScenarioResult]) -> dict:
     }
 
 
-def print_summary(results: list[ScenarioResult], metrics: dict) -> None:
-    mode_table = Table(title="Mode Performance Summary")
+def build_mode_performance_table(metrics: dict, *, ascii_only: bool = False) -> Table:
+    mode_table = Table(
+        title="Mode Performance Summary",
+        box=rich_box.ASCII if ascii_only else rich_box.HEAVY_HEAD,
+    )
     mode_table.add_column("Mode", style="cyan")
     mode_table.add_column("Passed/Total", style="white")
     mode_table.add_column("Success", style="white")
@@ -1021,9 +1075,14 @@ def print_summary(results: list[ScenarioResult], metrics: dict) -> None:
             f"{stats['average_wall_time_seconds']:.2f}s",
         )
 
-    CONSOLE.print(mode_table)
+    return mode_table
 
-    scenario_table = Table(title="Scenario Results")
+
+def build_scenario_results_table(results: list[ScenarioResult], *, ascii_only: bool = False) -> Table:
+    scenario_table = Table(
+        title="Scenario Results",
+        box=rich_box.ASCII if ascii_only else rich_box.HEAVY_HEAD,
+    )
     scenario_table.add_column("Status", justify="center")
     scenario_table.add_column("Mode", style="cyan")
     scenario_table.add_column("Category", style="cyan")
@@ -1046,9 +1105,14 @@ def print_summary(results: list[ScenarioResult], metrics: dict) -> None:
             result.reason,
         )
 
-    CONSOLE.print(scenario_table)
+    return scenario_table
 
-    metrics_table = Table(title="Overall Metrics")
+
+def build_overall_metrics_table(metrics: dict, *, ascii_only: bool = False) -> Table:
+    metrics_table = Table(
+        title="Overall Metrics",
+        box=rich_box.ASCII if ascii_only else rich_box.HEAVY_HEAD,
+    )
     metrics_table.add_column("Metric", style="cyan")
     metrics_table.add_column("Value", style="white")
 
@@ -1070,27 +1134,106 @@ def print_summary(results: list[ScenarioResult], metrics: dict) -> None:
     metrics_table.add_row("payment_recovery_success_rate", f"{metrics['payment_recovery_success_rate']:.2%}")
     metrics_table.add_row("confirmation_gate_success_rate", f"{metrics['confirmation_gate_success_rate']:.2%}")
 
-    CONSOLE.print(metrics_table)
+    return metrics_table
 
 
-def write_report(results: list[ScenarioResult], metrics: dict) -> Path:
+def build_fallback_table(ok: bool, reason: str, metrics: dict[str, int], *, ascii_only: bool = False) -> Table:
+    table = Table(
+        title="Fallback Smoke Check",
+        box=rich_box.ASCII if ascii_only else rich_box.HEAVY_HEAD,
+    )
+    table.add_column("Status", style="cyan")
+    table.add_column("Reason", style="white")
+    table.add_column("Parser Fallback", justify="center")
+    table.add_column("Response Fallback", justify="center")
+    table.add_column("Shape", justify="center")
+
+    table.add_row(
+        "PASS" if ok else "FAIL",
+        reason,
+        "PASS" if metrics.get("parser_fallback_ok", 0) else "FAIL",
+        "PASS" if metrics.get("response_fallback_ok", 0) else "FAIL",
+        "PASS" if metrics.get("response_shape_ok", 0) else "FAIL",
+    )
+    return table
+
+
+def print_summary(results: list[ScenarioResult], metrics: dict) -> None:
+    CONSOLE.print(build_mode_performance_table(metrics))
+    CONSOLE.print(build_scenario_results_table(results))
+    CONSOLE.print(build_overall_metrics_table(metrics))
+
+
+def print_fallback_summary(ok: bool, reason: str, metrics: dict[str, int]) -> None:
+    CONSOLE.print(build_fallback_table(ok, reason, metrics))
+
+
+def prune_old_evaluation_reports() -> None:
+    reports = sorted(
+        OUTPUT_DIR.glob("evaluation_*.txt"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+    for old_report in reports[EVALUATION_REPORT_RETENTION:]:
+        old_report.unlink(missing_ok=True)
+
+
+def write_dated_evaluation_report(
+    *,
+    results: list[ScenarioResult],
+    metrics: dict,
+    fallback_ok: bool,
+    fallback_reason: str,
+    fallback_metrics: dict[str, int],
+    modes: list[EvalMode],
+    exhaustive: bool,
+    repeats: int,
+    llm_repeats: int,
+    scenario_retries: int,
+) -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    report = {
-        "metrics": metrics,
-        "results": [
-            {
-                **asdict(result),
-                "turn_records": [asdict(record) for record in result.turn_records],
-            }
-            for result in results
-        ],
-    }
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = OUTPUT_DIR / f"evaluation_{timestamp}.txt"
 
-    output_path = OUTPUT_DIR / "latest_metrics.json"
-    output_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    report_console = Console(
+        width=EVALUATOR_CONFIG.report_width,
+        record=True,
+        force_terminal=True,
+        color_system=None,
+        legacy_windows=False,
+        safe_box=False,
+        file=StringIO(),
+    )
 
-    return output_path
+    report_console.print("SettleSentry Agent Evaluation")
+    report_console.print(f"Generated at: {datetime.now().isoformat(timespec='seconds')}")
+    report_console.print(f"Modes: {', '.join(mode.value for mode in modes)}")
+    report_console.print(f"Exhaustive: {exhaustive}")
+    report_console.print(f"Repeats (local): {repeats}")
+    report_console.print(f"Repeats (llm/full-llm): {llm_repeats}")
+    report_console.print(f"Scenario retries: {scenario_retries}")
+    report_console.print()
+
+    report_console.print(build_fallback_table(fallback_ok, fallback_reason, fallback_metrics))
+    report_console.print()
+    report_console.print(build_mode_performance_table(metrics))
+    report_console.print()
+    report_console.print(build_overall_metrics_table(metrics))
+    report_console.print()
+    report_console.print(build_scenario_results_table(results))
+
+    report_path.write_text(report_console.export_text(clear=False), encoding="utf-8")
+    prune_old_evaluation_reports()
+    return report_path
+
+
+def to_repo_relative(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -1109,15 +1252,24 @@ def parse_args() -> argparse.Namespace:
         default="local",
         help="Single mode to evaluate when --no-all is used.",
     )
-    parser.add_argument("--repeats", type=int, default=1, help="Repeats for local mode.")
-    parser.add_argument("--llm-repeats", type=int, default=1, help="Repeats for llm and full-llm modes.")
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=EVALUATOR_CONFIG.local_repeats_default,
+        help="Repeats for local mode.",
+    )
+    parser.add_argument(
+        "--llm-repeats",
+        type=int,
+        default=EVALUATOR_CONFIG.llm_repeats_default,
+        help="Repeats for llm and full-llm modes.",
+    )
     parser.add_argument(
         "--scenario-retries",
         type=int,
-        default=1,
+        default=EVALUATOR_CONFIG.scenario_retries_default,
         help="Retry attempts per scenario run. Retries are visible in the report.",
     )
-    parser.add_argument("--json-only", action="store_true", help="Only write JSON report.")
     parser.add_argument(
         "--exhaustive",
         action=BooleanOptionalAction,
@@ -1153,23 +1305,53 @@ def main() -> None:
             exhaustive=args.exhaustive,
         )
 
-        for repeat_index in range(1, repeats + 1):
-            for scenario in mode_scenarios:
-                results.append(
-                    run_scenario_with_retries(
-                        scenario=scenario,
-                        mode=mode,
-                        repeat_index=repeat_index,
-                        max_attempts=args.scenario_retries,
+        mode_total_runs = len(mode_scenarios) * repeats
+        CONSOLE.print(f"Running {mode_total_runs} scenarios for mode {mode.value}")
+
+        with tqdm(
+            total=mode_total_runs,
+            desc=f"mode={mode.value}",
+            unit="scenario",
+            leave=False,
+        ) as progress:
+            for repeat_index in range(1, repeats + 1):
+                for scenario in mode_scenarios:
+                    progress.set_postfix_str(f"{scenario.name} (repeat {repeat_index})")
+                    results.append(
+                        run_scenario_with_retries(
+                            scenario=scenario,
+                            mode=mode,
+                            repeat_index=repeat_index,
+                            max_attempts=args.scenario_retries,
+                        )
                     )
-                )
+                    progress.update(1)
+
+    fallback_ok, fallback_reason, fallback_metrics = run_fallback_smoke_checks()
+    print_fallback_summary(fallback_ok, fallback_reason, fallback_metrics)
+
+    if not fallback_ok:
+        raise SystemExit(1)
 
     metrics = aggregate_metrics(results)
-    report_path = write_report(results, metrics)
+    metrics["fallback_smoke"] = fallback_metrics
 
-    if not args.json_only:
-        print_summary(results, metrics)
-        print(f"\nWrote report: {report_path}")
+    text_report_path = write_dated_evaluation_report(
+        results=results,
+        metrics=metrics,
+        fallback_ok=fallback_ok,
+        fallback_reason=fallback_reason,
+        fallback_metrics=fallback_metrics,
+        modes=modes,
+        exhaustive=args.exhaustive,
+        repeats=args.repeats,
+        llm_repeats=args.llm_repeats,
+        scenario_retries=args.scenario_retries,
+    )
+
+    print_summary(results, metrics)
+
+    CONSOLE.print(f"Saved evaluation text report: {to_repo_relative(text_report_path)}")
 
     failed = [result for result in results if not result.passed]
     raise SystemExit(1 if failed else 0)
