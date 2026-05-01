@@ -38,7 +38,7 @@ Sensitive values include DOB, Aadhaar digits, pincode, full card number, CVV, ra
 | Guardrail | amount exceeds balance, no payment without confirmation |
 | Recovery | account-not-found recovery, verification recovery, payment failure recovery |
 | Failure close | verification exhaustion, zero balance, payment attempts exhausted |
-| Conversation | side questions, status questions |
+| Conversation | side-question pending-state preservation |
 | Correction | valid and invalid amount corrections |
 
 ### 1. Successful Payment Flow
@@ -113,19 +113,16 @@ Coverage:
 - out-of-order identity inputs,
 - out-of-order payment inputs,
 - side questions during the flow,
-- status questions after verification,
 - corrections to account, identity, amount, or card details,
 - cancellation,
-- zero-balance account behavior,
-- leap-day DOB handling.
+- zero-balance account behavior.
 
 Expected result:
 
 - the agent resumes the correct pending step after side questions,
 - corrections reset only the affected downstream context,
 - cancellation closes the conversation,
-- zero-balance accounts do not proceed to payment unless policy allows,
-- valid leap-day dates are handled correctly.
+- zero-balance accounts do not proceed to payment unless policy allows.
 
 
 
@@ -220,7 +217,7 @@ uv run python scripts/evaluate_agent.py --all
 ## Sample Evaluation Snapshot
 
 ```bash
-uv run python scripts/evaluate_agent.py --no-all --mode local --json-only
+uv run python scripts/evaluate_agent.py --no-all --mode local
 ```
 
 | Mode | Passed / Total | Success Rate | Avg / Run |
@@ -248,6 +245,12 @@ uv run python scripts/evaluate_agent.py --no-all --mode local --json-only
 - No interface-shape violations, privacy leaks, or premature payment calls were observed.
 - Guardrails, recovery flows, and closure behavior all passed in this run.
 - LLM and full-llm modes were not part of this snapshot; run `--all` when LLM credentials are configured.
+
+The evaluator also runs a fallback smoke check and writes a dated text report under:
+
+`var/evaluation/evaluation_YYYYMMDD_HHMMSS.txt`
+
+By default, only the latest 3 text reports are retained.
 
 ## Mode-Specific Expectations
 
@@ -326,4 +329,3 @@ A release is considered evaluation-ready when:
 * cancellation closes the conversation,
 * sensitive data is not exposed in responses,
 * and local mode remains deterministic across repeated runs.
-

@@ -204,53 +204,21 @@ uv run pytest -q
 
 ## Public Interface Contract
 
-The public evaluation interface is `Agent.next(user_input: str) -> dict`.
+SettleSentry exposes a single turn-based interface: `Agent.next(user_input: str) -> {"message": str}`.
 
-```python
-from settlesentry.agent.interface import Agent
-
-agent = Agent()
-
-response = agent.next("Hi")
-
-assert set(response.keys()) == {"message"}
-print(response["message"])
-```
-
-Each `Agent.next()` call processes one user turn. The same `Agent` instance maintains conversation state internally across turns.
+Full interface behavior and design rationale are documented in [Design Document](docs/DESIGN.md).
 
 ## Project Structure
 
 ```text
-settlesentry/
-  pyproject.toml
-  src/
-    settlesentry/
-      agent/
-        interface.py
-        deps.py
-        actions.py
-        workflow/
-          graph.py        # LangGraph construction and routing edges
-          routing.py      # Required-field and next-node routing logic
-          nodes.py        # LangGraph adapter nodes + node registry
-          input.py        # Input ingestion and correction handling
-          operations.py   # Workflow operations (lookup/verify/prepare/process/close)
-          helpers.py      # Shared result/context/policy-block/cleanup helpers
-          constants.py    # Workflow-level intent/error constants
-          result.py       # AgentToolResult model for node outputs
-        parsing/          # Deterministic + LLM parser implementations
-        response/         # Deterministic + LLM response generation
-        policy/           # Deterministic policy models/rules/sets
-        state/            # Conversation state models
-      integrations/   # Payment API client and schemas
-      security/       # Card and identity validation helpers
-      core/           # Settings and logging
-      utils/          # Timing utilities
-tests/                # Unit and workflow tests
-scripts/              # Scenario evaluator and helper scripts
-docs/                 # Assignment instructions and supporting documentation
+settlesentry/          # Installable package workspace
+tests/                 # Unit and workflow tests
+scripts/               # Scenario evaluator and helper scripts
+docs/                  # Assignment and design documentation
+var/evaluation/        # Generated evaluation reports
 ```
+
+For detailed package/module layout, see [settlesentry/README.md](settlesentry/README.md).
 
 ## Example Happy Path
 
@@ -277,13 +245,8 @@ Full happy-path, failure, retry, side-question, and edge-case examples are docum
 
 ## Assumptions
 
-* Identity verification is performed inside the agent after account lookup.
-* Full name matching is strict and exact.
-* At least one secondary factor must match exactly: DOB, Aadhaar last 4, or pincode.
-* Partial payments are allowed by default, matching the assignment API notes.
-* Zero-balance accounts are closed without collecting payment unless policy configuration changes.
-* Terminal service failures are closed safely to avoid ambiguous payment retries.
-* The provided payment API does not persist balance updates after successful payment.
+Assumptions are maintained in the design document as the canonical source:
+[Design Document - Assumptions](docs/DESIGN.md#7-assumptions)
 
 ## Documentation
 

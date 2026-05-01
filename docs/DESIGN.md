@@ -70,6 +70,14 @@ The agent exposes a simple turn-based interface: one user message in, one struct
 
 This keeps the system easy to evaluate and easy to integrate into chat surfaces, while the agent internally maintains conversation state across turns.
 
+The concrete public contract is:
+
+* `Agent.next(user_input: str) -> dict`
+* return shape must be exactly `{"message": str}`
+* each call processes one workflow turn for the active session
+
+Any internal workflow/policy/parser/responder changes must preserve this interface shape.
+
 ### Conversation State Management
 
 The state layer tracks:
