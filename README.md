@@ -226,7 +226,23 @@ settlesentry/
   pyproject.toml
   src/
     settlesentry/
-      agent/          # Agent interface, LangGraph workflow, parser, policy, state, responder
+      agent/
+        interface.py
+        deps.py
+        actions.py
+        workflow/
+          graph.py        # LangGraph construction and routing edges
+          routing.py      # Required-field and next-node routing logic
+          nodes.py        # LangGraph adapter nodes + node registry
+          input.py        # Input ingestion and correction handling
+          operations.py   # Workflow operations (lookup/verify/prepare/process/close)
+          helpers.py      # Shared result/context/policy-block/cleanup helpers
+          constants.py    # Workflow-level intent/error constants
+          result.py       # AgentToolResult model for node outputs
+        parsing/          # Deterministic + LLM parser implementations
+        response/         # Deterministic + LLM response generation
+        policy/           # Deterministic policy models/rules/sets
+        state/            # Conversation state models
       integrations/   # Payment API client and schemas
       security/       # Card and identity validation helpers
       core/           # Settings and logging

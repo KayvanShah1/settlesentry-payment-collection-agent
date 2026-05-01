@@ -103,6 +103,13 @@ The workflow advances only when the current step explicitly allows the next step
 
 This makes the workflow predictable, testable, and safer than a free-form LLM-driven flow.
 
+Implementation is intentionally split to keep responsibilities explicit:
+
+* `workflow/input.py` handles parsing/merge/correction ingestion,
+* `workflow/operations.py` contains domain operations (lookup, verify, prepare, confirm, process, close),
+* `workflow/helpers.py` contains shared result/context/policy-block helpers,
+* `workflow/nodes.py` contains thin LangGraph adapters and a node registry used by `workflow/graph.py`.
+
 ### Policy Layer
 
 The policy layer is the hard safety boundary.

@@ -11,7 +11,23 @@ settlesentry/
   pyproject.toml
   src/
     settlesentry/
-      agent/          # Agent interface, workflow, parser, policy, state, responder
+      agent/
+        interface.py
+        deps.py
+        actions.py
+        workflow/
+          graph.py
+          routing.py
+          nodes.py
+          input.py
+          operations.py
+          helpers.py
+          constants.py
+          result.py
+        parsing/
+        response/
+        policy/
+        state/
       integrations/   # Payment API client and schemas
       security/       # Card and identity validation helpers
       core/           # Settings and logging
