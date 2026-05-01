@@ -253,7 +253,7 @@ STATIC_MESSAGES: dict[str, str] = {
     "account_loaded": "Account found. Please share your full name exactly as registered on the account.",
     "verification_exhausted": (
         "I'm unable to verify your identity after multiple attempts, so I can't continue with payment collection "
-        f"in this chat. {NO_PAYMENT_PROCESSED} {TRY_AGAIN_LATER}."
+        f"in this chat. {NO_PAYMENT_PROCESSED} {TRY_AGAIN_LATER}"
     ),
     "zero_balance": "Identity verified. There is no outstanding balance to pay on this account, so the payment flow is now closed.",
     "invalid_card": "The card number appears to be invalid. Please share the full card number again.",

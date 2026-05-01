@@ -115,16 +115,16 @@ Coverage:
 - side questions during the flow,
 - corrections to account, identity, amount, or card details,
 - cancellation,
-- zero-balance account behavior.
-- out-of-order or multi-field user input before the corresponding prompt
+- zero-balance account behavior,
+- out-of-order or multi-field user input before the corresponding prompt.
 
 Expected result:
 
 - the agent resumes the correct pending step after side questions,
 - corrections reset only the affected downstream context,
 - cancellation closes the conversation,
-- zero-balance accounts do not proceed to payment unless policy allows.
-- volunteered information is remembered without bypassing account lookup, identity verification, payment validation, or explicit confirmation gates
+- zero-balance accounts do not proceed to payment unless policy allows,
+- volunteered information is remembered without bypassing account lookup, identity verification, payment validation, or explicit confirmation gates.
 
 ## Evaluation Matrix
 
