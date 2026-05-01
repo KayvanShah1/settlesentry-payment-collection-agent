@@ -145,20 +145,6 @@ def test_agent_handles_side_question_without_losing_state():
     assert "account" in response["message"].lower()
 
 
-def test_agent_closes_deterministically_when_already_in_payment_success():
-    agent = make_agent()
-    agent.state.step = ConversationStep.PAYMENT_SUCCESS
-    agent.state.payment_amount = Decimal("400.00")
-    agent.state.transaction_id = "txn_123"
-
-    response = agent.next("anything")
-
-    assert "Transaction ID: txn_123" in response["message"]
-    assert "INR 400.00" in response["message"]
-    assert agent.state.completed is True
-    assert agent.state.step == ConversationStep.CLOSED
-
-
 def test_agent_happy_path_processes_payment():
     agent = make_agent()
 

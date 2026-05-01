@@ -3,7 +3,9 @@ from __future__ import annotations
 from decimal import Decimal
 
 from settlesentry.agent.deps import AgentDeps
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
 from settlesentry.agent.response.messages import build_fallback_response
+from settlesentry.agent.state import ConversationStep
 from settlesentry.agent.workflow.helpers import response_context
 from settlesentry.agent.workflow.input import submit_user_input
 from settlesentry.agent.workflow.operations import (
@@ -14,8 +16,6 @@ from settlesentry.agent.workflow.operations import (
     recap_and_close,
     verify_identity,
 )
-from settlesentry.agent.parsing.deterministic import DeterministicInputParser
-from settlesentry.agent.state import ConversationStep
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,
     LookupResult,

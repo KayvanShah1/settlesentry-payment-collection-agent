@@ -5,7 +5,7 @@ from typing import Any
 from settlesentry.agent.contracts import MessageResponse
 from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.parsing.base import InputParser
-from settlesentry.agent.response.messages import ResponseContext, build_fallback_response, format_amount
+from settlesentry.agent.response.messages import ResponseContext, build_fallback_response
 from settlesentry.agent.response.writer import ResponseWriter
 from settlesentry.agent.state import ConversationState
 from settlesentry.agent.workflow.graph import build_payment_graph
@@ -57,7 +57,7 @@ class Agent:
         """
         # Closed sessions are immutable.
         if self.state.completed:
-            return MessageResponse(message=self._closed_response()).model_dump()
+            return MessageResponse(message=self._response_for_status("conversation_closed")).model_dump()
 
         operation = OperationLogContext(operation="agent_turn")
         step_before = self.state.step
@@ -72,7 +72,7 @@ class Agent:
                 }
             )
 
-            message = result.get("final_response") or self._fallback_response()
+            message = result.get("final_response") or self._response_for_status("unknown")
             response = MessageResponse(message=message)
 
         except Exception as exc:
@@ -86,7 +86,7 @@ class Agent:
                     error_type=type(exc).__name__,
                 ),
             )
-            response = MessageResponse(message=self._fallback_response())
+            response = MessageResponse(message=self._response_for_status("unknown"))
 
         logger.info(
             "agent_turn_completed",
@@ -100,21 +100,16 @@ class Agent:
 
         return response.model_dump()
 
-    def _closed_response(self) -> str:
-        if self.state.transaction_id:
-            return (
-                "This conversation is already closed. "
-                f"Payment of {format_amount(self.state.payment_amount)} was processed successfully. "
-                f"Transaction ID: {self.state.transaction_id}."
-            )
-
-        return "This conversation is already closed. No payment has been processed."
-
-    def _fallback_response(self) -> str:
+    def _response_for_status(self, status: str) -> str:
         context = ResponseContext(
-            status="unknown",
+            status=status,
             required_fields=(),
-            facts={},
+            facts={
+                "amount": self.state.payment_amount,
+                "payment_amount": self.state.payment_amount,
+                "transaction_id": self.state.transaction_id,
+            },
             safe_state=self.state.safe_view(session_id=self.session_id),
         )
+
         return build_fallback_response(context)

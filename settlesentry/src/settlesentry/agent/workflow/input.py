@@ -27,52 +27,6 @@ from settlesentry.agent.workflow.routing import (
 )
 from settlesentry.core import OperationLogContext
 
-PARSER_FIELD_KEYS_BY_EXPECTED_FIELD: dict[str, tuple[str, ...]] = {
-    "account_id": ("account_id",),
-    "full_name": ("full_name",),
-    "dob": ("dob",),
-    "aadhaar_last4": ("aadhaar_last4",),
-    "pincode": ("pincode",),
-    "payment_amount": ("payment_amount",),
-    "cardholder_name": ("cardholder_name",),
-    "card_number": ("card_number",),
-    "cvv": ("cvv",),
-    "expiry": ("expiry_month", "expiry_year"),
-    "confirmation": ("confirmation",),
-}
-
-PARSER_FIELD_KEYS = {
-    "account_id",
-    "full_name",
-    "dob",
-    "aadhaar_last4",
-    "pincode",
-    "payment_amount",
-    "cardholder_name",
-    "card_number",
-    "cvv",
-    "expiry_month",
-    "expiry_year",
-    "confirmation",
-}
-
-
-def keep_only_expected_fields(
-    extracted: ExtractedUserInput,
-    expected: tuple[str, ...],
-) -> ExtractedUserInput:
-    if not expected:
-        return extracted
-
-    allowed_fields: set[str] = set()
-
-    for field in expected:
-        allowed_fields.update(PARSER_FIELD_KEYS_BY_EXPECTED_FIELD.get(field, ()))
-
-    updates = {field: None for field in PARSER_FIELD_KEYS if field not in allowed_fields}
-
-    return extracted.model_copy(update=updates)
-
 
 def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
     """Parse one turn, handle interruptions/corrections, merge state, and route."""
@@ -138,8 +92,6 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
 
     if extracted.intent == UserIntent.CORRECT_PREVIOUS_DETAIL:
         return handle_correction(deps, extracted)
-
-    extracted = keep_only_expected_fields(extracted, current_expected_fields)
 
     confirmation_received = extracted.confirmation is True
     confirmation_expected = "confirmation" in current_expected_fields
