@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from settlesentry.agent.actions import ProposedAction, UserIntent
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.response.messages import ResponseContext
 from settlesentry.agent.parsing.base import ParserContext
 from settlesentry.agent.policy import (
     LOOKUP_ACCOUNT_POLICY,
@@ -18,6 +17,9 @@ from settlesentry.agent.policy import (
     PolicyDecision,
     identity_matches_account,
 )
+from settlesentry.agent.response.messages import ResponseContext
+from settlesentry.agent.state import ConversationStep, ExtractedUserInput, SafeConversationState
+from settlesentry.agent.workflow.result import AgentToolResult
 from settlesentry.agent.workflow.routing import (
     expected_fields,
     recommended_node,
@@ -25,8 +27,6 @@ from settlesentry.agent.workflow.routing import (
     required_fields_for_policy_reason,
     set_step_from_required_fields,
 )
-from settlesentry.agent.state import ConversationStep, ExtractedUserInput, SafeConversationState
-from settlesentry.agent.workflow.result import AgentToolResult
 from settlesentry.core import OperationLogContext, get_logger, settings
 from settlesentry.integrations.payments.schemas import PaymentsAPIErrorCode
 
@@ -169,9 +169,11 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
     if deps.state.completed:
         return _result(deps, operation, ok=False, status="conversation_closed")
 
+    current_expected_fields = expected_fields(deps)
+
     context = ParserContext.from_state(
         deps.state,
-        expected_fields=expected_fields(deps),
+        expected_fields=current_expected_fields,
     )
 
     raw_lower = user_input.lower()
@@ -186,7 +188,7 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
             operation,
             ok=False,
             status="invalid_user_input",
-            required_fields=expected_fields(deps),
+            required_fields=current_expected_fields,
             facts={"error_type": type(exc).__name__},
         )
 
@@ -228,9 +230,11 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
         return handle_correction(deps, extracted)
 
     confirmation_received = extracted.confirmation is True
+    confirmation_expected = "confirmation" in current_expected_fields
 
     # Normal user data enters state here. Merge does not clear previous values
-    # unless a specific branch does so later.
+    # unless a specific branch does so later. Confirmation is intentionally not
+    # merged here because confirm_payment owns the final confirmation flip.
     deps.state.merge(extracted.model_copy(update={"confirmation": None}))
 
     if extracted.payment_amount is not None and deps.state.verified:
@@ -240,9 +244,9 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
         if blocked is not None:
             return blocked
 
-    if confirmation_received:
-        # Confirmation is captured separately from payment processing;
-        # confirm_payment still re-checks policy before process_payment.
+    if confirmation_received and confirmation_expected:
+        # Confirmation is actionable only when the workflow was already waiting
+        # for confirmation. Early "yes" replies must not advance payment.
         deps.state.step = ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
         return _result(
             deps,
