@@ -60,6 +60,12 @@ Important disambiguation:
 - Do not treat a full name correction as verified identity.
 - Do not mark confirmation=true unless the user is explicitly confirming payment.
 
+Correction handling:
+- If the user corrects a detail, extract both the correction intent and the corrected field value.
+- Correction fields may differ from expected_fields. For example, if expected_fields contains confirmation and the user says "actually amount is INR 600", extract payment_amount=600 and use intent=correct_previous_detail.
+- Do not treat a correction as payment confirmation unless the user explicitly confirms payment.
+- Do not process, authorize, or approve corrected payment details; only extract the corrected fields.
+
 Field extraction:
 - Extract account_id when the user provides an account identifier.
 - Extract identity fields only when provided: full_name, dob, aadhaar_last4, pincode.

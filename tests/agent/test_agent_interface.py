@@ -162,3 +162,20 @@ def test_agent_happy_path_processes_payment():
     assert agent.state.completed is True
     assert agent.state.transaction_id == "txn_123"
     assert "Transaction ID: txn_123" in response["message"]
+
+
+def test_agent_records_recent_conversation_turns():
+    agent = Agent(parser=DeterministicInputParser(), responder=build_fallback_response)
+
+    agent.next("Hi")
+    agent.next("ACC1001")
+
+    turns = agent.deps.conversation_turns
+
+    assert len(turns) >= 4
+    assert turns[0].role == "user"
+    assert turns[0].content == "Hi"
+    assert turns[1].role == "assistant"
+    assert "account ID" in turns[1].content
+    assert turns[2].role == "user"
+    assert turns[2].content == "ACC1001"

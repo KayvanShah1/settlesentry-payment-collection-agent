@@ -37,9 +37,13 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
 
     current_expected_fields = expected_fields(deps)
 
+    deps.add_user_turn(user_input)
+
     context = ParserContext.from_state(
         deps.state,
         expected_fields=current_expected_fields,
+        last_assistant_message=deps.last_assistant_message(),
+        recent_turns=deps.recent_turns(),
     )
 
     raw_lower = user_input.lower()

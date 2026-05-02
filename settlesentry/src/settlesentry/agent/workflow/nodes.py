@@ -16,7 +16,6 @@ from settlesentry.agent.workflow.operations import (
 )
 from settlesentry.agent.workflow.result import AgentToolResult
 
-
 GraphState = dict[str, Any]
 Operation = Callable[[AgentDeps], AgentToolResult]
 
@@ -45,6 +44,7 @@ def response_node(graph_state: GraphState) -> GraphState:
 
     context = response_context(deps, node_result)
     message = deps.responder(context)
+    deps.add_assistant_turn(message)
 
     return {"final_response": message}
 
