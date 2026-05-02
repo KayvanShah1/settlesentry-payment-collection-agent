@@ -925,8 +925,6 @@ FULL_LLM_SMOKE_SCENARIOS = {
     "happy_path_partial_payment",
     "side_question_preserves_pending_state",
     "cancel_at_confirmation_closes_without_payment",
-    # "valid_amount_correction_requires_reconfirmation",
-    # "invalid_amount_correction_blocked",
 }
 
 
