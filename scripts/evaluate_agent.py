@@ -42,6 +42,7 @@ from settlesentry.integrations.payments.schemas import (
     PaymentResult,
     PaymentsAPIErrorCode,
 )
+from settlesentry.security.redaction import redact_sensitive_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = REPO_ROOT / "var" / "evaluation"
@@ -49,7 +50,7 @@ CONSOLE = Console(legacy_windows=False)
 
 
 class EvaluatorConfig(BaseSettings):
-    report_retention: int = Field(default=3, ge=1, le=50)
+    report_retention: int = Field(default=10, ge=1, le=50)
     local_repeats_default: int = Field(default=1, ge=1, le=20)
     llm_repeats_default: int = Field(default=1, ge=1, le=20)
     scenario_retries_default: int = Field(default=1, ge=1, le=10)
@@ -924,6 +925,8 @@ FULL_LLM_SMOKE_SCENARIOS = {
     "happy_path_partial_payment",
     "side_question_preserves_pending_state",
     "cancel_at_confirmation_closes_without_payment",
+    # "valid_amount_correction_requires_reconfirmation",
+    # "invalid_amount_correction_blocked",
 }
 
 
@@ -1167,9 +1170,50 @@ def build_fallback_table(ok: bool, reason: str, metrics: dict[str, int], *, asci
     return table
 
 
+def build_failed_turn_trace_table(results: list[ScenarioResult], *, ascii_only: bool = False) -> Table:
+    table = Table(
+        title="Failed Scenario Turn Trace",
+        box=rich_box.ASCII if ascii_only else rich_box.HEAVY_HEAD,
+    )
+    table.add_column("Mode", style="cyan")
+    table.add_column("Scenario", style="white")
+    table.add_column("Turn", justify="right")
+    table.add_column("User", style="white")
+    table.add_column("Agent", style="magenta")
+    table.add_column("Step", style="cyan")
+    table.add_column("Amount", style="white")
+    table.add_column("Confirmed", style="white")
+    table.add_column("Completed", style="white")
+    table.add_column("Payment Calls", style="white")
+
+    for result in results:
+        if result.passed:
+            continue
+
+        for index, record in enumerate(result.turn_records, start=1):
+            table.add_row(
+                result.mode,
+                result.name,
+                str(index),
+                redact_sensitive_text(record.user_input),
+                redact_sensitive_text(record.agent_message),
+                record.step,
+                record.payment_amount or "",
+                str(record.payment_confirmed),
+                str(record.completed),
+                str(record.payment_calls),
+            )
+
+    return table
+
+
 def print_summary(results: list[ScenarioResult], metrics: dict) -> None:
     CONSOLE.print(build_mode_performance_table(metrics))
     CONSOLE.print(build_scenario_results_table(results))
+
+    if any(not result.passed for result in results):
+        CONSOLE.print(build_failed_turn_trace_table(results))
+
     CONSOLE.print(build_overall_metrics_table(metrics))
 
 
@@ -1232,6 +1276,9 @@ def write_dated_evaluation_report(
     report_console.print(build_overall_metrics_table(metrics))
     report_console.print()
     report_console.print(build_scenario_results_table(results))
+    if any(not result.passed for result in results):
+        report_console.print()
+        report_console.print(build_failed_turn_trace_table(results))
 
     report_path.write_text(report_console.export_text(clear=False), encoding="utf-8")
     prune_old_evaluation_reports()
