@@ -92,7 +92,7 @@ SettleSentry uses deterministic safety checks for payment-critical behavior:
 * The payment API is called only from the payment processing node
 * Terminal payment service failures close safely to avoid ambiguous retries
 * Full card number and CVV are cleared from active state after success, terminal failure, cancellation, or closure
-* Out-of-order user input may be remembered, but workflow and policy gates still control when sensitive actions can occur.
+* Out-of-order user input may be remembered, but workflow and policy gates still control when sensitive actions can occur
 
 ## Agent Flow
 

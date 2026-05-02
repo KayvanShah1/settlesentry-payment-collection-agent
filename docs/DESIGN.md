@@ -12,25 +12,25 @@ The goal is not open-ended chat. The goal is safe, auditable, policy-governed ex
 
 Payment collection conversations are operationally and compliance-sensitive. The agent must:
 
-- maintain context across multiple user turns,
-- handle partial and out-of-order user input,
-- verify identity before disclosing balance,
-- avoid premature or unsafe API calls,
-- validate payment details before processing,
-- distinguish recoverable failures from terminal failures,
-- protect sensitive identity and payment data,
-- and communicate outcomes clearly.
+- maintain context across multiple user turns
+- handle partial and out-of-order user input
+- verify identity before disclosing balance
+- avoid premature or unsafe API calls
+- validate payment details before processing
+- distinguish recoverable failures from terminal failures
+- protect sensitive identity and payment data
+- and communicate outcomes clearly
 
 A generic chatbot is not sufficient for this workflow because payment collection requires deterministic control over state, verification, tool calls, and failure handling.
 
 SettleSentry addresses this through layered control:
 
-- language understanding,
-- conversation state tracking,
-- deterministic policy checks,
-- graph-based workflow orchestration,
-- typed external API integration,
-- and safe response generation.
+- language understanding
+- conversation state tracking
+- deterministic policy checks
+- graph-based workflow orchestration
+- typed external API integration
+- and safe response generation
 
 ## 3. System Architecture
 
@@ -82,13 +82,13 @@ Any internal workflow/policy/parser/responder changes must preserve this interfa
 
 The state layer tracks:
 
-* account progress,
-* verification progress,
-* payment detail progress,
-* confirmation status,
-* retry counters,
-* payment outcome,
-* and closure status.
+* account progress
+* verification progress
+* payment detail progress
+* confirmation status
+* retry counters
+* payment outcome
+* and closure status
 
 State enables the agent to handle out-of-order input without skipping required safety steps.
 
@@ -100,14 +100,14 @@ In addition to structured workflow state, the session keeps recent user/assistan
 
 The workflow orchestrator controls progression across the payment collection lifecycle:
 
-* user input handling,
-* account lookup,
-* identity verification,
-* payment preparation,
-* confirmation,
-* payment processing,
-* recap and closure,
-* and response generation.
+* user input handling
+* account lookup
+* identity verification
+* payment preparation
+* confirmation
+* payment processing
+* recap and closure
+* and response generation
 
 The workflow advances only when the current step explicitly allows the next step. If a policy check blocks progress or more user input is needed, the agent routes to a response step instead of continuing blindly.
 
@@ -115,10 +115,10 @@ This makes the workflow predictable, testable, and safer than a free-form LLM-dr
 
 Implementation is intentionally split to keep responsibilities explicit:
 
-* `workflow/input.py` handles parsing/merge/correction ingestion,
-* `workflow/operations.py` contains domain operations (lookup, verify, prepare, confirm, process, close),
-* `workflow/helpers.py` contains shared result/context/policy-block helpers,
-* `workflow/nodes.py` contains thin LangGraph adapters and a node registry used by `workflow/graph.py`.
+* `workflow/input.py` handles parsing/merge/correction ingestion
+* `workflow/operations.py` contains domain operations (lookup, verify, prepare, confirm, process, close)
+* `workflow/helpers.py` contains shared result/context/policy-block helpers
+* `workflow/nodes.py` contains thin LangGraph adapters and a node registry used by `workflow/graph.py`
 
 ### Policy Layer
 
@@ -126,15 +126,15 @@ The policy layer is the hard safety boundary.
 
 It decides whether a workflow action is allowed before any sensitive operation happens. Policy checks cover:
 
-* whether the conversation is still open,
-* whether account lookup has succeeded,
-* whether identity has been verified,
-* whether retry limits remain available,
-* whether payment amount is valid,
-* whether amount is within the account balance,
-* whether payment details are complete,
-* whether explicit confirmation is present,
-* and whether payment processing is allowed.
+* whether the conversation is still open
+* whether account lookup has succeeded
+* whether identity has been verified
+* whether retry limits remain available
+* whether payment amount is valid
+* whether amount is within the account balance
+* whether payment details are complete
+* whether explicit confirmation is present
+* and whether payment processing is allowed
 
 The LLM cannot override these checks.
 
@@ -160,8 +160,8 @@ The response layer does not mutate state, call tools, verify identity, authorize
 
 The system integrates with two external API operations:
 
-* account lookup,
-* payment processing.
+* account lookup
+* payment processing
 
 Identity verification remains inside the agent. The external payment API is used only after the agent has completed verification, collected valid payment details, and received explicit confirmation.
 
@@ -249,26 +249,26 @@ sequenceDiagram
 
 The implementation makes the following assumptions:
 
-* One agent session represents one user conversation.
-* Each user message is processed as one turn.
-* Conversation state is maintained for the lifetime of the session.
-* Identity verification is performed inside the agent after account lookup.
-* Full name matching is strict and exact.
-* At least one secondary factor must match exactly: DOB, Aadhaar last 4, or pincode.
-* Verification data such as DOB, Aadhaar, and pincode is not echoed back to the user.
-* Outstanding balance is safe to show only after successful identity verification.
-* Partial payments are allowed by default, matching the provided API behavior.
-* Zero-balance accounts are closed without collecting payment unless policy configuration changes.
-* Local schemas validate payment amount and card structure before payment processing; the payment API may still reject card, CVV, expiry, amount, balance, or service-level failures.
-* The payment API does not persist balance updates after a successful payment.
-* Terminal service failures are closed safely to avoid ambiguous payment retries.
-* Raw card number and CVV are cleared after success, terminal failure, cancellation, or closure.
-* LLM behavior is optional and must not be required for deterministic local execution.
-* The account balance represents an outstanding payable amount for the customer account.
-* Card details are collected only as the payment method for that outstanding balance.
-* This implementation does not assume the account itself is a credit card account.
-* Recent conversation turns may be retained for parser context during the active session.
-* Conversation history is not used as payment authority; structured state and policy gates remain authoritative.
+* One agent session represents one user conversation
+* Each user message is processed as one turn
+* Conversation state is maintained for the lifetime of the session
+* Identity verification is performed inside the agent after account lookup
+* Full name matching is strict and exact
+* At least one secondary factor must match exactly: DOB, Aadhaar last 4, or pincode
+* Verification data such as DOB, Aadhaar, and pincode is not echoed back to the user
+* Outstanding balance is safe to show only after successful identity verification
+* Partial payments are allowed by default, matching the provided API behavior
+* Zero-balance accounts are closed without collecting payment unless policy configuration changes
+* Local schemas validate payment amount and card structure before payment processing; the payment API may still reject card, CVV, expiry, amount, balance, or service-level failures
+* The payment API does not persist balance updates after a successful payment
+* Terminal service failures are closed safely to avoid ambiguous payment retries
+* Raw card number and CVV are cleared after success, terminal failure, cancellation, or closure
+* LLM behavior is optional and must not be required for deterministic local execution
+* The account balance represents an outstanding payable amount for the customer account
+* Card details are collected only as the payment method for that outstanding balance
+* This implementation does not assume the account itself is a credit card account
+* Recent conversation turns may be retained for parser context during the active session
+* Conversation history is not used as payment authority; structured state and policy gates remain authoritative
 
 ## 8. Key Design Decisions
 
@@ -276,11 +276,11 @@ The implementation makes the following assumptions:
 
 The LLM can help interpret natural language and phrase replies, but it cannot:
 
-* verify identity,
-* approve balance disclosure,
-* authorize payment,
-* bypass policy gates,
-* or directly execute payment API calls.
+* verify identity
+* approve balance disclosure
+* authorize payment
+* bypass policy gates
+* or directly execute payment API calls
 
 This keeps payment authority in deterministic workflow and policy logic rather than model output.
 
@@ -288,8 +288,8 @@ This keeps payment authority in deterministic workflow and policy logic rather t
 
 Identity verification requires:
 
-* exact full-name match,
-* plus one exact secondary-factor match.
+* exact full-name match
+* plus one exact secondary-factor match
 
 This avoids fuzzy matching risks in a sensitive financial workflow.
 
@@ -317,12 +317,12 @@ User-facing responses are generated from safe workflow context only. Sensitive v
 
 The design supports safer payment collection automation by improving:
 
-* consistency in payment collection handling,
-* customer guidance during recoverable errors,
-* protection against unsafe workflow shortcuts,
-* auditability through explicit workflow and policy boundaries,
-* operational efficiency for repetitive payment workflows,
-* extensibility for future tool-calling and human-handoff scenarios.
+* consistency in payment collection handling
+* customer guidance during recoverable errors
+* protection against unsafe workflow shortcuts
+* auditability through explicit workflow and policy boundaries
+* operational efficiency for repetitive payment workflows
+* extensibility for future tool-calling and human-handoff scenarios
 
 The main business value is not simply automating chat. It is automating the workflow while preserving control over identity verification, balance disclosure, payment authorization, and failure recovery.
 
@@ -348,12 +348,12 @@ The current design keeps state within one active session. A production deploymen
 
 Future improvements could include:
 
-* graph-native tool-calling where the LLM proposes actions and the workflow/policy layer validates them,
-* broader adversarial and simulation-based evaluation suites,
-* persistent session storage,
-* observability dashboards for workflow transitions and policy blocks,
-* human handoff thresholds for repeated failures,
-* stronger audit logs and redaction controls,
-* configurable business policies by account or client segment,
-* expanded localization and multilingual flow handling,
-* PCI-DSS aligned tokenization or payment-provider handoff for real card data.
+* graph-native tool-calling where the LLM proposes actions and the workflow/policy layer validates them
+* broader adversarial and simulation-based evaluation suites
+* persistent session storage
+* observability dashboards for workflow transitions and policy blocks
+* human handoff thresholds for repeated failures
+* stronger audit logs and redaction controls
+* configurable business policies by account or client segment
+* expanded localization and multilingual flow handling
+* PCI-DSS aligned tokenization or payment-provider handoff for real card data
