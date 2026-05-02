@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from settlesentry.agent.actions import ProposedAction, UserIntent
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
 
 
 def test_parser_detects_agent_identity_question():

@@ -1,8 +1,8 @@
 import json
 from decimal import Decimal
 
-from settlesentry.agent.parsers.base import ConversationTurn, ParserContext
-from settlesentry.agent.parsers.prompts import build_parser_instructions, build_parser_user_prompt
+from settlesentry.agent.parsing.base import ConversationTurn, ParserContext
+from settlesentry.agent.parsing.prompts import build_parser_instructions, build_parser_user_prompt
 from settlesentry.agent.state import ConversationState
 
 

@@ -4,8 +4,8 @@ from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from settlesentry.agent.parsers.base import ParserContext
-from settlesentry.agent.parsers.prompts import build_parser_instructions, build_parser_user_prompt
+from settlesentry.agent.parsing.base import ParserContext
+from settlesentry.agent.parsing.prompts import build_parser_instructions, build_parser_user_prompt
 from settlesentry.agent.state import ConversationState, ExtractedUserInput
 from settlesentry.core import OperationLogContext, get_logger, settings
 

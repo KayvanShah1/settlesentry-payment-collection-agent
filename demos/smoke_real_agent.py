@@ -4,9 +4,9 @@ import argparse
 import os
 from typing import Literal
 
-from settlesentry.agent.agent import Agent
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.responder import DeterministicResponseGenerator
+from settlesentry.agent.interface import Agent
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
+from settlesentry.agent.response.writer import DeterministicResponseGenerator
 
 AgentMode = Literal["deterministic", "llm"]
 

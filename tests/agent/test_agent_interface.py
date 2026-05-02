@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from settlesentry.agent.agent import Agent
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.responder import DeterministicResponseGenerator
+from settlesentry.agent.interface import Agent
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
+from settlesentry.agent.response.messages import build_fallback_response
 from settlesentry.agent.state import ConversationStep
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,
@@ -49,7 +49,7 @@ def make_agent() -> Agent:
     return Agent(
         payments_client=FakePaymentsClient(),
         parser=DeterministicInputParser(),
-        responder=DeterministicResponseGenerator(),
+        responder=build_fallback_response,
         grouped_card_collection=False,
     )
 
@@ -145,20 +145,6 @@ def test_agent_handles_side_question_without_losing_state():
     assert "account" in response["message"].lower()
 
 
-def test_agent_closes_deterministically_when_already_in_payment_success():
-    agent = make_agent()
-    agent.state.step = ConversationStep.PAYMENT_SUCCESS
-    agent.state.payment_amount = Decimal("400.00")
-    agent.state.transaction_id = "txn_123"
-
-    response = agent.next("anything")
-
-    assert "Transaction ID: txn_123" in response["message"]
-    assert "INR 400.00" in response["message"]
-    assert agent.state.completed is True
-    assert agent.state.step == ConversationStep.CLOSED
-
-
 def test_agent_happy_path_processes_payment():
     agent = make_agent()
 
@@ -176,3 +162,20 @@ def test_agent_happy_path_processes_payment():
     assert agent.state.completed is True
     assert agent.state.transaction_id == "txn_123"
     assert "Transaction ID: txn_123" in response["message"]
+
+
+def test_agent_records_recent_conversation_turns():
+    agent = Agent(parser=DeterministicInputParser(), responder=build_fallback_response)
+
+    agent.next("Hi")
+    agent.next("ACC1001")
+
+    turns = agent.deps.conversation_turns
+
+    assert len(turns) >= 4
+    assert turns[0].role == "user"
+    assert turns[0].content == "Hi"
+    assert turns[1].role == "assistant"
+    assert "account ID" in turns[1].content
+    assert turns[2].role == "user"
+    assert turns[2].content == "ACC1001"

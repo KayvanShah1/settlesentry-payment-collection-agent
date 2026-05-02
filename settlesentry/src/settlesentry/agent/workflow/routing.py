@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.parsers.base import ExpectedField
+from settlesentry.agent.parsing.base import ExpectedField
 from settlesentry.agent.policy import PolicyReason
 from settlesentry.agent.state import ConversationStep
 
 
 def expected_fields(deps: AgentDeps) -> tuple[ExpectedField, ...]:
-    # Parser guidance: tells deterministic/LLM parsers how to interpret bare
-    # replies like "123" or "Nithin Jain".
+    # Parser guidance for bare replies like "123" or "Nithin Jain".
     step = deps.state.step
 
     if step in {ConversationStep.START, ConversationStep.WAITING_FOR_ACCOUNT_ID}:
@@ -58,8 +57,7 @@ def expected_fields(deps: AgentDeps) -> tuple[ExpectedField, ...]:
 
 
 def required_fields(deps: AgentDeps) -> tuple[str, ...]:
-    # User-facing missing-field resolver. This should reflect current state, not
-    # what was asked previously.
+    # User-facing missing-field resolver from current state.
     state = deps.state
 
     if state.completed:
@@ -117,8 +115,7 @@ def required_fields(deps: AgentDeps) -> tuple[str, ...]:
 
 
 def recommended_node(deps: AgentDeps) -> str | None:
-    # Auto-advance only when all prerequisites for the next tool are present.
-    # Otherwise the graph stops and responds.
+    # Auto-advance only when the next operation is fully ready.
     state = deps.state
 
     if state.step in {ConversationStep.START, ConversationStep.WAITING_FOR_ACCOUNT_ID} and not state.account_id:
@@ -140,8 +137,7 @@ def required_fields_for_policy_reason(
     deps: AgentDeps,
     reason: PolicyReason,
 ) -> tuple[str, ...]:
-    # Converts policy failures into actionable prompts, e.g. amount failure ->
-    # ask amount, missing card -> ask card field.
+    # Map policy reasons to the next user prompt fields.
     if reason == PolicyReason.MISSING_ACCOUNT_ID:
         return ("account_id",)
 
@@ -208,8 +204,7 @@ def missing_card_fields(deps: AgentDeps) -> tuple[str, ...]:
 
 
 def set_step_from_required_fields(deps: AgentDeps, fields: tuple[str, ...]) -> None:
-    # Step follows the first required field so the next parser call can interpret
-    # bare user replies correctly.
+    # Step tracks the first required field for next-turn parser context.
     if not fields:
         return
 

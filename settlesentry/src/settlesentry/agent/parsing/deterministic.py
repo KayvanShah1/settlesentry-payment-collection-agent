@@ -7,7 +7,7 @@ from re import Pattern
 from pydantic import ValidationError
 
 from settlesentry.agent.actions import ProposedAction, UserIntent
-from settlesentry.agent.parsers.base import ExpectedField, ParserContext
+from settlesentry.agent.parsing.base import ExpectedField, ParserContext
 from settlesentry.agent.state import ExtractedUserInput
 
 

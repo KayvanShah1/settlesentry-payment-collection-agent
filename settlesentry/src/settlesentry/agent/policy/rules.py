@@ -1,114 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from decimal import Decimal
-from enum import StrEnum, auto
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
+from settlesentry.agent.policy.models import PolicyDecision, PolicyReason
 from settlesentry.agent.state import ConversationState
-from settlesentry.core import get_logger, settings
-
-logger = get_logger("AgentPolicy")
-
-
-class PolicyReason(StrEnum):
-    ALLOWED = auto()
-
-    CONVERSATION_CLOSED = auto()
-
-    MISSING_ACCOUNT_ID = auto()
-    ACCOUNT_ALREADY_LOADED = auto()
-    ACCOUNT_NOT_LOADED = auto()
-
-    MISSING_FULL_NAME = auto()
-    MISSING_SECONDARY_FACTOR = auto()
-    IDENTITY_NOT_VERIFIED = auto()
-    VERIFICATION_ATTEMPTS_EXHAUSTED = auto()
-
-    ZERO_BALANCE = auto()
-    MISSING_PAYMENT_AMOUNT = auto()
-    INVALID_PAYMENT_AMOUNT = auto()
-    AMOUNT_EXCEEDS_BALANCE = auto()
-    AMOUNT_EXCEEDS_POLICY_LIMIT = auto()
-
-    MISSING_CARD_FIELDS = auto()
-    INVALID_PAYMENT_REQUEST = auto()
-    PAYMENT_NOT_CONFIRMED = auto()
-    PAYMENT_ATTEMPTS_EXHAUSTED = auto()
-    PARTIAL_PAYMENT_NOT_ALLOWED = auto()
-
-
-class PolicyDecision(BaseModel):
-    allowed: bool
-    reason: PolicyReason
-    failed_rule: str | None = None
-    message: str | None = None
-
-    @classmethod
-    def allow(cls) -> "PolicyDecision":
-        return cls(
-            allowed=True,
-            reason=PolicyReason.ALLOWED,
-        )
-
-    @classmethod
-    def deny(
-        cls,
-        reason: PolicyReason,
-        message: str | None = None,
-    ) -> "PolicyDecision":
-        return cls(
-            allowed=False,
-            reason=reason,
-            message=message,
-        )
-
-
-PolicyCheck = Callable[[ConversationState], PolicyDecision]
-
-
-@dataclass(frozen=True)
-class PolicyRule:
-    name: str
-    check: PolicyCheck
-
-
-@dataclass(frozen=True)
-class PolicySet:
-    name: str
-    rules: tuple[PolicyRule, ...]
-
-    def _log_decision(self, state: ConversationState, decision: PolicyDecision) -> None:
-        log = logger.debug if decision.allowed else logger.info
-        log(
-            "policy_decision",
-            extra={
-                "policy_name": self.name,
-                "allowed": decision.allowed,
-                "reason": decision.reason.value,
-                "failed_rule": decision.failed_rule,
-            },
-        )
-
-    def evaluate(self, state: ConversationState) -> PolicyDecision:
-        # Policies are ordered guardrails. First failing rule determines both the
-        # status and the next required field.
-        for rule in self.rules:
-            decision = rule.check(state)
-
-            if not decision.allowed:
-                resolved = decision
-                if resolved.failed_rule is None:
-                    resolved = resolved.model_copy(update={"failed_rule": rule.name})
-
-                self._log_decision(state, resolved)
-                return resolved
-
-        allowed = PolicyDecision.allow()
-        self._log_decision(state, allowed)
-        return allowed
+from settlesentry.core import settings
 
 
 def _deny(
@@ -365,66 +263,23 @@ def identity_matches_account(state: ConversationState) -> bool:
     return name_matches and secondary_matches
 
 
-COMMON_ACCOUNT_CONTEXT_RULES = (
-    PolicyRule("require_conversation_open", require_conversation_open),
-    PolicyRule("require_account_loaded", require_account_loaded),
-)
-
-COMMON_VERIFIED_ACCOUNT_RULES = COMMON_ACCOUNT_CONTEXT_RULES + (
-    PolicyRule("require_verified_identity", require_verified_identity),
-)
-
-PAYMENT_ELIGIBILITY_RULES = COMMON_VERIFIED_ACCOUNT_RULES + (
-    PolicyRule("require_positive_balance", require_positive_balance),
-)
-
-COMMON_PAYMENT_AMOUNT_RULES = (
-    PolicyRule("require_payment_amount", require_payment_amount),
-    PolicyRule("require_amount_within_balance", require_amount_within_balance),
-    PolicyRule("require_partial_payment_policy", require_partial_payment_policy),
-    PolicyRule("require_amount_within_policy_limit", require_amount_within_policy_limit),
-)
-
-COMMON_PAYMENT_REQUEST_RULES = COMMON_PAYMENT_AMOUNT_RULES + (
-    PolicyRule("require_complete_card_fields", require_complete_card_fields),
-    PolicyRule("require_valid_payment_request", require_valid_payment_request),
-)
-
-LOOKUP_ACCOUNT_POLICY = PolicySet(
-    name="lookup_account",
-    rules=(
-        PolicyRule("require_conversation_open", require_conversation_open),
-        PolicyRule("require_account_id", require_account_id),
-        PolicyRule("require_account_not_loaded", require_account_not_loaded),
-    ),
-)
-
-VERIFY_IDENTITY_POLICY = PolicySet(
-    name="verify_identity",
-    rules=COMMON_ACCOUNT_CONTEXT_RULES
-    + (
-        PolicyRule("require_verification_attempts_available", require_verification_attempts_available),
-        PolicyRule("require_full_name", require_full_name),
-        PolicyRule("require_secondary_factor", require_secondary_factor),
-    ),
-)
-
-VALIDATE_PAYMENT_AMOUNT_POLICY = PolicySet(
-    name="validate_payment_amount",
-    rules=PAYMENT_ELIGIBILITY_RULES + COMMON_PAYMENT_AMOUNT_RULES,
-)
-
-PREPARE_PAYMENT_POLICY = PolicySet(
-    name="prepare_payment",
-    rules=PAYMENT_ELIGIBILITY_RULES + COMMON_PAYMENT_REQUEST_RULES,
-)
-
-PROCESS_PAYMENT_POLICY = PolicySet(
-    # Payment processing has the strongest gate: verified identity, amount/card
-    # validity, attempts available, and explicit confirmation.
-    name="process_payment",
-    rules=PAYMENT_ELIGIBILITY_RULES
-    + (PolicyRule("require_payment_attempts_available", require_payment_attempts_available),)
-    + COMMON_PAYMENT_REQUEST_RULES
-    + (PolicyRule("require_payment_confirmation", require_payment_confirmation),),
-)
+__all__ = [
+    "identity_matches_account",
+    "require_account_id",
+    "require_account_loaded",
+    "require_account_not_loaded",
+    "require_amount_within_balance",
+    "require_amount_within_policy_limit",
+    "require_complete_card_fields",
+    "require_conversation_open",
+    "require_full_name",
+    "require_partial_payment_policy",
+    "require_payment_amount",
+    "require_payment_attempts_available",
+    "require_payment_confirmation",
+    "require_positive_balance",
+    "require_secondary_factor",
+    "require_valid_payment_request",
+    "require_verification_attempts_available",
+    "require_verified_identity",
+]

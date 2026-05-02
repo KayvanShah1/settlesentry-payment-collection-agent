@@ -1,9 +1,9 @@
 import pytest
 
-import settlesentry.agent.parsers.llm as llm_module
+import settlesentry.agent.parsing.llm as llm_module
 from settlesentry.agent.actions import ProposedAction, UserIntent
-from settlesentry.agent.parsers.base import ParserContext
-from settlesentry.agent.parsers.llm import PydanticAIInputParser
+from settlesentry.agent.parsing.base import ParserContext
+from settlesentry.agent.parsing.llm import PydanticAIInputParser
 from settlesentry.agent.state import ConversationState, ExtractedUserInput
 
 

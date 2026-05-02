@@ -3,20 +3,19 @@ from __future__ import annotations
 from decimal import Decimal
 
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.messages import build_fallback_response
-from settlesentry.agent.nodes import (
+from settlesentry.agent.parsing.deterministic import DeterministicInputParser
+from settlesentry.agent.response.messages import build_fallback_response
+from settlesentry.agent.state import ConversationStep
+from settlesentry.agent.workflow.helpers import response_context
+from settlesentry.agent.workflow.input import submit_user_input
+from settlesentry.agent.workflow.operations import (
     confirm_payment,
     lookup_account,
     prepare_payment,
     process_payment,
     recap_and_close,
-    response_context,
-    submit_user_input,
     verify_identity,
 )
-from settlesentry.agent.parsers.deterministic import DeterministicInputParser
-from settlesentry.agent.responder import DeterministicResponseGenerator
-from settlesentry.agent.state import ConversationStep
 from settlesentry.integrations.payments.schemas import (
     AccountDetails,
     LookupResult,
@@ -80,7 +79,7 @@ def make_deps(payments_client=None) -> AgentDeps:
     return AgentDeps(
         payments_client=payments_client or FakePaymentsClient(),
         parser=DeterministicInputParser(),
-        responder=DeterministicResponseGenerator(),
+        responder=build_fallback_response,
         grouped_card_collection=False,
     )
 
