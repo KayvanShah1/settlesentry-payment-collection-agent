@@ -15,7 +15,7 @@ settlesentry/
       agent/                      # Conversational agent implementation
         interface.py              # Public Agent interface (Agent.next)
         contracts.py              # Shared public/LLM message response contract
-        deps.py                   # Session-scoped runtime dependencies
+        deps.py                   # Session-scoped runtime dependencies and conversation context
         actions.py                # Parser intent/proposed-action enums
         workflow/
           graph.py                # LangGraph construction and edge wiring

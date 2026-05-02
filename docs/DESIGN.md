@@ -94,6 +94,8 @@ State enables the agent to handle out-of-order input without skipping required s
 
 Sensitive data is kept out of user-facing responses unless it is explicitly safe to show. For example, outstanding balance is disclosed only after successful identity verification.
 
+In addition to structured workflow state, the session keeps recent user/assistant turns for parser context. This helps LLM-assisted parsing understand short replies and corrections, while payment-critical decisions continue to rely on structured state and policy gates.
+
 ### Workflow Orchestration
 
 The workflow orchestrator controls progression across the payment collection lifecycle:
@@ -143,6 +145,8 @@ The language understanding layer extracts useful structure from user messages, s
 This layer can be deterministic or LLM-assisted. In both cases, extracted information is treated as user-provided input, not as authorization.
 
 The parser may extract multiple fields from a single message, especially in LLM-assisted modes. Extracted fields are stored as user-provided input, while deterministic workflow and policy gates decide when account lookup, identity verification, balance disclosure, payment preparation, confirmation, and payment processing may occur. This allows the agent to handle out-of-order information without giving the parser authority to skip payment-critical controls.
+
+Recent conversation turns and the last assistant message are provided to the parser as context, but only structured extracted fields are merged into workflow state.
 
 ### Response Layer
 
@@ -263,6 +267,8 @@ The implementation makes the following assumptions:
 * The account balance represents an outstanding payable amount for the customer account.
 * Card details are collected only as the payment method for that outstanding balance.
 * This implementation does not assume the account itself is a credit card account.
+* Recent conversation turns may be retained for parser context during the active session.
+* Conversation history is not used as payment authority; structured state and policy gates remain authoritative.
 
 ## 8. Key Design Decisions
 

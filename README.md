@@ -9,14 +9,13 @@
 ![uv](https://img.shields.io/badge/uv-Package%20Manager-6E56CF)
 ![License](https://img.shields.io/badge/License-BSD%203--Clause-blue)
 
-SettleSentry is a policy-governed conversational payment collection agent that verifies identity, reveals outstanding balance only after verification, collects payment details, and processes payments through a controlled API workflow.
+**SettleSentry** is a conversational payment collection agent for services where customers may have an outstanding amount due, such as cloud bills, mobile plans, subscriptions, or other recurring service balances. It verifies the customer first, shows the amount due only after verification, and guides payment collection through a *controlled*, *policy-governed* workflow.
 
-The core design principle is strict separation of concerns:
+The core design principle is separation of language understanding from payment authority:
 
-- LLM usage is optional and bounded to language understanding and response phrasing.
-- Workflow progression is controlled by LangGraph orchestration.
-- Payment safety is enforced by deterministic policy gates.
-- Payment API calls happen only after verification, validated payment details, and explicit confirmation.
+- LLM usage is optional and limited to parsing and response phrasing.
+- LangGraph controls workflow progression.
+- Deterministic policy gates control verification, balance disclosure, confirmation, and payment execution.
 
 ## Why This Project Exists
 
@@ -42,7 +41,7 @@ A free-form chatbot alone is not sufficient for this problem. SettleSentry separ
 
 ## Business Value
 
-SettleSentry demonstrates how an AI payment agent can support collection workflows without giving uncontrolled authority to the LLM.
+SettleSentry demonstrates how payment collection can be automated while preserving clear verification, confirmation, failure-handling, and audit boundaries.
 
 The design improves:
 
@@ -77,6 +76,8 @@ flowchart TD
 ```
 
 > Each user message is processed as one controlled workflow turn. The conversation session preserves state across turns, so the agent can handle multi-turn progress without losing account, verification, payment, retry, or closure context.
+
+> The parser receives the current workflow state plus recent conversation turns, so LLM-assisted modes can interpret corrections and short replies without giving the LLM authority over verification, balance disclosure, or payment execution.
 
 ## Safety Model
 
@@ -124,6 +125,8 @@ For evaluator-safe runs, use deterministic local mode:
 uv run settlesentry chat --mode local
 uv run python scripts/evaluate_agent.py --no-all --mode local
 ```
+
+> Use `--exhaustive` when you want the selected LLM mode to run the full scenario matrix. Without `--exhaustive`, LLM modes run a smaller smoke/core subset to control runtime and provider cost.
 
 The default CLI mode is `llm`. Use `local` when no OpenRouter API key is configured.
 
