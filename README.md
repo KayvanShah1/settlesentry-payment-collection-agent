@@ -9,7 +9,7 @@
 ![uv](https://img.shields.io/badge/uv-Package%20Manager-6E56CF)
 ![License](https://img.shields.io/badge/License-BSD%203--Clause-blue)
 
-**SettleSentry** is a conversational payment collection agent for services where customers may have an outstanding amount due, such as cloud bills, mobile plans, subscriptions, or other recurring service balances. It verifies the customer first, shows the amount due only after verification, and guides payment collection through a *controlled*, *policy-governed* workflow.
+**SettleSentry** is a conversational payment collection agent for services where customers may have an outstanding amount due, such as cloud bills, mobile plans, subscriptions, or other recurring service balances. It verifies the customer first, shows the amount due only after verification, and guides payment collection through a controlled, policy-governed workflow.
 
 The core design principle is separation of language understanding from payment authority:
 
@@ -17,39 +17,24 @@ The core design principle is separation of language understanding from payment a
 - LangGraph controls workflow progression.
 - Deterministic policy gates control verification, balance disclosure, confirmation, and payment execution.
 
-## Why This Project Exists
-
-Payment collection is a high-risk conversational workflow. The agent must maintain multi-turn context, avoid premature tool calls, handle partial and out-of-order user input, enforce strict identity verification, recover safely from API failures, and protect sensitive identity and payment data.
-
-A free-form chatbot alone is not sufficient for this problem. SettleSentry separates language understanding from payment authority: the LLM may help interpret or phrase messages, but it does not verify identity, authorize payment, decide balance disclosure, or call payment APIs directly.
-
 ![SettleSentry payment workflow illustration](docs/img/stock_image.jpg)
+
+## Why It Matters
+
+Payment collection is a sensitive workflow. The agent must maintain multi-turn context, avoid premature tool calls, handle partial or out-of-order input, enforce identity verification, recover safely from failures, and protect sensitive identity and payment data.
+
+SettleSentry demonstrates how this workflow can be automated without giving uncontrolled authority to an LLM. Language models can help interpret user input and phrase responses, while verification, balance disclosure, payment authorization, and API execution remain controlled by deterministic workflow and policy logic.
 
 ## Core Capabilities
 
-- Multi-turn conversation state management
-- Account lookup using the provided external API
-- Strict identity verification using exact full name and one matching secondary factor
-- Balance disclosure only after successful verification
-- Payment amount and card detail collection
-- Explicit confirmation gate before payment processing
-- Policy-gated payment execution
-- Retry handling for verification and payment flows
-- Safe terminal closure for ambiguous service failures
+- Multi-turn account verification and payment collection
+- Strict identity verification before balance disclosure
+- Policy-gated amount validation, card collection, and payment execution
+- Explicit confirmation before any payment API call
+- Recovery flows for verification, amount, card, API, cancellation, and terminal failure cases
 - Optional LLM parser and optional LLM responder with deterministic fallback
-- Evaluation-compatible Agent interface
-
-## Business Value
-
-SettleSentry demonstrates how payment collection can be automated while preserving clear verification, confirmation, failure-handling, and audit boundaries.
-
-The design improves:
-
-- **Customer experience:** clear step-by-step guidance through verification and payment
-- **Operational efficiency:** automated handling of repetitive account lookup and payment collection flows
-- **Risk control:** deterministic gates for verification, balance disclosure, and payment execution
-- **Auditability:** explicit workflow states, policy decisions, and structured execution paths
-- **Extensibility:** LangGraph-based workflow can support future graph-native tool-calling modes
+- Scenario evaluator covering success, recovery, guardrail, correction, and closure paths
+- Evaluation-compatible interface
 
 ## Architecture Overview
 
@@ -75,74 +60,46 @@ flowchart TD
     W --> A[User-Facing Message]
 ```
 
-> Each user message is processed as one controlled workflow turn. The conversation session preserves state across turns, so the agent can handle multi-turn progress without losing account, verification, payment, retry, or closure context.
+Each user message is processed as one controlled workflow turn. The session preserves structured workflow state and recent conversation context so the agent can handle short replies, corrections, retries, and out-of-order information without losing control of payment-critical decisions.
 
-> The parser receives the current workflow state plus recent conversation turns, so LLM-assisted modes can interpret corrections and short replies without giving the LLM authority over verification, balance disclosure, or payment execution.
+For the full architecture, policy model, assumptions, and tradeoffs, see the [Design Document](docs/DESIGN.md).
 
 ## Safety Model
 
-SettleSentry uses deterministic safety checks for payment-critical behavior:
+SettleSentry keeps payment authority outside the LLM:
 
-* No payment step before successful identity verification
-* Strict verification: exact full name plus one exact secondary factor
-* DOB, Aadhaar, and pincode are not echoed back to the user
-* Outstanding balance is shown only after verification succeeds
-* Payment amount is validated before collecting card details
-* Payment processing requires explicit user confirmation
-* The payment API is called only from the payment processing node
-* Terminal payment service failures close safely to avoid ambiguous retries
-* Full card number and CVV are cleared from active state after success, terminal failure, cancellation, or closure
-* Out-of-order user input may be remembered, but workflow and policy gates still control when sensitive actions can occur
+* Balance is shown only after successful identity verification.
+* Payment amount is validated before card collection.
+* Payment processing requires valid payment details and explicit confirmation.
+* All payment-critical transitions pass deterministic policy checks.
+* Full card number and CVV are cleared after success, terminal failure, cancellation, or closure.
+* Out-of-order user input may be remembered, but policy gates still control sensitive actions.
 
-## Agent Flow
-
-1. Greet user and request account ID
-2. Look up account through the provided API
-3. Request full name exactly as registered
-4. Request one secondary verification factor
-5. Verify identity inside the agent
-6. Share outstanding balance after verification
-7. Collect payment amount
-8. Collect cardholder name, card number, expiry, and CVV
-9. Ask for explicit yes/no confirmation
-10. Process payment through the API
-11. Communicate success with transaction ID or failure with reason
-12. Recap and close the conversation
+For detailed safety rules and workflow decisions, see [Design Document](docs/DESIGN.md).
 
 ## Modes
 
-The CLI supports three current modes:
+The CLI supports three modes:
 
-| Mode       | Input Understanding                 | Response Writing                       | Use Case                                                                     |
-| ---------- | ----------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------- |
-| `local`    | Deterministic parser                | Deterministic responses                | Stable baseline with no external LLM dependency                              |
-| `llm`      | LLM parser + deterministic fallback | Deterministic responses                | Better extraction from natural language while keeping fixed response wording |
-| `full-llm` | LLM parser + deterministic fallback | LLM responder + deterministic fallback | More natural response phrasing with safety fallback                          |
-
-For evaluator-safe runs, use deterministic local mode:
-
-```bash
-uv run settlesentry chat --mode local
-uv run python scripts/evaluate_agent.py --no-all --mode local
-```
-
-> Use `--exhaustive` when you want the selected LLM mode to run the full scenario matrix. Without `--exhaustive`, LLM modes run a smaller smoke/core subset to control runtime and provider cost.
+| Mode       | Input Understanding                 | Response Writing                       | Use Case                                                               |
+| ---------- | ----------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
+| `local`    | Deterministic parser                | Deterministic responses                | Stable baseline with no external LLM dependency                        |
+| `llm`      | LLM parser + deterministic fallback | Deterministic responses                | Natural-language extraction with fixed response wording                |
+| `full-llm` | LLM parser + deterministic fallback | LLM responder + deterministic fallback | Natural-language extraction and response phrasing with safety fallback |
 
 The default CLI mode is `llm`. Use `local` when no OpenRouter API key is configured.
 
 In all modes, payment authority remains deterministic and policy-controlled. The LLM does not verify identity, authorize payment, decide balance disclosure, or call payment APIs directly.
 
-> A future extension can add a graph-native tool-calling mode where the LLM proposes actions, while LangGraph and the policy layer validate and execute only approved tool calls.
-
 ## Tech Stack
 
 * Python 3.12
 * LangGraph for workflow orchestration
-* Pydantic and Pydantic Settings for schema and configuration validation
+* Pydantic and Pydantic Settings for schema/configuration validation
 * PydanticAI with OpenRouter for optional LLM parser/responder behavior
 * HTTPX and Tenacity for API communication and retry handling
 * Typer and Rich for interactive CLI
-* Pytest for test coverage
+* Pytest for unit and workflow test coverage
 * uv for environment and execution management
 
 ## Setup
@@ -153,7 +110,7 @@ From the repository root:
 uv sync --all-packages
 ```
 
-## Environment Variables
+## Configuration
 
 LLM configuration is optional and required only for `llm` and `full-llm` modes.
 
@@ -181,36 +138,65 @@ AGENT_POLICY_ALLOW_PARTIAL_PAYMENTS=true
 AGENT_POLICY_ALLOW_ZERO_BALANCE_PAYMENT=false
 ```
 
-## Run Interactive CLI
-> If no OpenRouter API key is configured, run the agent in `local` mode
+## Run the Agent
+
 ```bash
-# Local rule-based mode:
+# Local deterministic mode
 uv run settlesentry chat --mode local
 
-# LLM parser mode:
+# LLM parser with deterministic responses
 uv run settlesentry chat --mode llm
 
-# LLM parser and LLM responder mode:
+# LLM parser and LLM-written responses
 uv run settlesentry chat --mode full-llm
 
-# Show privacy-safe state after each turn:
+# Show privacy-safe state after each turn
 uv run settlesentry chat --mode local --show-state
 
-# Enable console debug logs:
+# Enable console debug logs
 uv run settlesentry chat --mode local --debug-logs
 ```
 
-## Run Tests
+If no OpenRouter API key is configured, use `local` mode.
+
+## Run Tests and Evaluation
+
+Run the core test suite:
 
 ```bash
 uv run pytest -q
 ```
 
+Run the deterministic scenario evaluator:
+
+```bash
+uv run python scripts/evaluate_agent.py --no-all --mode local
+```
+
+Run LLM-assisted evaluation when credentials are configured:
+
+```bash
+uv run python scripts/evaluate_agent.py --no-all --mode llm
+uv run python scripts/evaluate_agent.py --no-all --mode full-llm
+```
+
+Use `--exhaustive` when you want the selected LLM mode to run the full scenario matrix. Without `--exhaustive`, LLM modes run a smaller subset to control runtime and provider cost.
+
+```bash
+uv run python scripts/evaluate_agent.py --no-all --mode full-llm --exhaustive
+```
+
+For evaluation methodology, metrics, and acceptance criteria, see [Evaluation Approach](docs/EVALUATION.md).
+
 ## Public Interface Contract
 
-SettleSentry exposes a single turn-based interface: `Agent.next(user_input: str) -> {"message": str}`.
+SettleSentry exposes a single turn-based interface:
 
-Full interface behavior and design rationale are documented in [Design Document](docs/DESIGN.md).
+```python
+Agent.next(user_input: str) -> {"message": str}
+```
+
+The interface is intentionally simple for evaluation and integration, while the implementation maintains session state, policy checks, graph orchestration, parser context, and external API boundaries internally.
 
 ## Project Structure
 
@@ -218,7 +204,7 @@ Full interface behavior and design rationale are documented in [Design Document]
 settlesentry/          # Installable package workspace
 tests/                 # Unit and workflow tests
 scripts/               # Scenario evaluator and helper scripts
-docs/                  # Assignment and design documentation
+docs/                  # Design, evaluation, and sample conversation docs
 var/evaluation/        # Generated evaluation reports
 ```
 
@@ -234,7 +220,7 @@ USER: ACC1001
 AGENT: Account found. Please share your full name exactly as registered on the account.
 
 USER: Nithin Jain
-AGENT: Please share your one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
+AGENT: Please share one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
 
 USER: 1990-05-14
 AGENT: Identity verified. Your outstanding balance is INR 1250.75. Please share the amount you would like to pay in INR.
@@ -245,31 +231,25 @@ USER: yes
 AGENT: Payment of INR 500.00 was processed successfully. Transaction ID: txn_.... This conversation is now closed.
 ```
 
-Full happy-path, failure, retry, side-question, and edge-case examples are documented in [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md).
-
-## Assumptions
-
-Assumptions are maintained in the design document as the canonical source:
-[Design Document - Assumptions](docs/DESIGN.md#7-assumptions)
+Full happy-path, failure, retry, side-question, correction, and closure examples are documented in [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md).
 
 ## Documentation
 
 * [Design Document](docs/DESIGN.md)
-* [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md)
 * [Evaluation Approach](docs/EVALUATION.md)
+* [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md)
 * [Assignment Instructions](docs/instructions/ASSIGNMENT.md)
+* [Package Layout](settlesentry/README.md)
 
 ## Disclaimer
 
 SettleSentry is a technical implementation and reference architecture for a payment collection agent. It is not intended for production payment processing as-is.
 
-The project demonstrates workflow orchestration, identity verification, policy-gated tool use, failure handling, and evaluation design. A production deployment would require additional security review, PCI-DSS controls, secrets management, monitoring, audit logging, human escalation, fraud controls, and compliance validation.
+A production deployment would require additional security review, PCI-DSS controls, secrets management, persistent session storage, monitoring, audit logging, human escalation, fraud controls, and compliance validation.
 
 > [!CAUTION]
 > Do not use real payment card data with this project. Use only assignment-provided or test payment data.
 
 ## License
 
-This project is licensed under the BSD 3-Clause License.
-
-See [LICENSE](LICENSE) for details.
+This project is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE) for details.

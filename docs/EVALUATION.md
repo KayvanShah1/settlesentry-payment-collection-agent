@@ -2,137 +2,53 @@
 
 ## Objective
 
-Evaluation verifies that SettleSentry completes payment collection conversations correctly, safely, and consistently across successful flows, verification failures, payment failures, and edge-case user behavior.
+Evaluation verifies that SettleSentry completes payment collection conversations correctly, safely, and consistently across success, recovery, guardrail, correction, and closure paths.
 
-The focus is not only whether the final outcome is correct, but whether each intermediate decision is correct:
+The focus is not only the final outcome, but also whether each intermediate decision is correct:
 
-- when the agent asks for information,
-- when it blocks progress,
-- when it calls an external API,
-- when it retries,
-- when it closes safely,
-- and when it reveals or withholds sensitive information.
+- when the agent asks for information
+- when it blocks progress
+- when it calls an external API
+- when it retries
+- when it closes safely
+- when it reveals or withholds sensitive information
 
 ## Definition of Correctness
 
 A conversation is considered correct when the agent:
 
-- preserves conversation context across turns,
-- asks only for the next required field,
-- handles partial and out-of-order input without skipping mandatory controls,
-- does not disclose balance before successful verification,
-- enforces strict verification using exact full name plus one exact secondary factor,
-- validates payment progression before any payment API call,
-- collects explicit confirmation before processing payment,
-- communicates retryable and terminal failures appropriately,
-- closes safely when continuation may be unsafe,
-- and avoids exposing sensitive values in user-facing responses.
+- preserves context across turns
+- asks for the next required field without unnecessary repetition
+- handles partial and out-of-order input without bypassing mandatory controls
+- verifies identity before disclosing the outstanding amount
+- validates payment progression before any payment API call
+- collects explicit confirmation before processing payment
+- communicates retryable and terminal failures appropriately
+- closes safely when continuation may be unsafe
+- avoids exposing sensitive values in user-facing responses
 
 Sensitive values include DOB, Aadhaar digits, pincode, full card number, CVV, raw account details, internal policy state, and stack traces.
 
-## Evaluation Coverage
+## Scenario Coverage
 
 | Category | Scenarios |
 |---|---|
 | Success | happy path, full-balance payment |
 | Guardrail | amount exceeds balance, no payment without confirmation |
-| Recovery | account-not-found recovery, verification recovery, payment failure recovery |
-| Failure close | verification exhaustion, zero balance, payment attempts exhausted |
+| Recovery | account-not-found recovery, verification recovery, secondary-factor recovery, payment failure recovery |
+| Failure close | verification exhaustion, zero balance, cancellation, payment attempts exhausted |
 | Conversation | side-question pending-state preservation |
-| Correction | valid and invalid amount corrections |
+| Correction | valid amount correction, invalid amount correction |
 
-### 1. Successful Payment Flow
-
-This verifies the expected end-to-end path.
-
-Coverage:
-
-- account lookup succeeds,
-- identity verification succeeds,
-- balance is disclosed only after verification,
-- payment amount is collected,
-- card details are collected,
-- explicit confirmation is received,
-- payment succeeds with a transaction ID,
-- conversation closes cleanly.
-
-Expected result:
-
-- payment is processed only after confirmation,
-- transaction ID is communicated,
-- no further payment questions are asked after closure.
-
-### 2. Verification Failure
-
-This verifies strict identity enforcement and retry behavior.
-
-Coverage:
-
-- wrong full name,
-- wrong DOB, Aadhaar last 4, or pincode,
-- partial verification input,
-- retry behavior while attempts remain,
-- retry exhaustion,
-- recovery to successful verification when corrected inputs are provided.
-
-Expected result:
-
-- balance is never disclosed before verification,
-- failed attempts are handled clearly,
-- exhausted verification attempts close safely,
-- correct retry prompts are produced.
-
-### 3. Payment Failure
-
-This verifies payment safety and recovery behavior.
-
-Coverage:
-
-- invalid amount,
-- amount exceeding outstanding balance,
-- invalid card number,
-- invalid CVV,
-- invalid expiry,
-- insufficient balance response from the API,
-- network, timeout, invalid response, or unexpected service failure.
-
-Expected result:
-
-- invalid amount is blocked before card collection,
-- payment API is not called before confirmation,
-- retryable failures ask for targeted correction,
-- terminal or ambiguous failures close safely,
-- no duplicate or unsafe payment attempt is made.
-
-### 4. Edge-Case Conversation Behavior
-
-This verifies conversational robustness beyond the standard flow.
-
-Coverage:
-
-- out-of-order identity inputs,
-- out-of-order payment inputs,
-- side questions during the flow,
-- corrections to account, identity, amount, or card details,
-- cancellation,
-- zero-balance account behavior,
-- out-of-order or multi-field user input before the corresponding prompt.
-
-Expected result:
-
-- the agent resumes the correct pending step after side questions,
-- corrections reset only the affected downstream context,
-- cancellation closes the conversation,
-- zero-balance accounts do not proceed to payment unless policy allows,
-- volunteered information is remembered without bypassing account lookup, identity verification, payment validation, or explicit confirmation gates.
+The automated evaluator covers end-to-end payment success, verification failures and recovery, amount guardrails, API rejection recovery, correction handling, cancellation, zero-balance closure, side questions, and terminal failure closure.
 
 ## Evaluation Matrix
 
 | Area | What is Checked | Expected Behavior |
 |---|---|---|
-| Context handling | Multi-turn memory, out-of-order inputs, corrections | State is preserved without skipping controls |
+| Context handling | Multi-turn memory, out-of-order inputs, corrections | State is preserved without skipping mandatory controls |
 | Verification | Exact full name plus one exact secondary factor | Verification passes only on strict match |
-| Balance disclosure | Timing of balance reveal | Balance appears only after verification |
+| Balance disclosure | Timing of amount-due reveal | Balance appears only after verification |
 | Payment amount | Positive amount, amount within balance, policy limits | Invalid amounts are blocked before card collection |
 | Card collection | Cardholder, card number, expiry, CVV | Missing or invalid fields are requested clearly |
 | Confirmation | Explicit yes/no confirmation | Payment is processed only after confirmation |
@@ -145,31 +61,19 @@ Expected result:
 
 | Metric | Meaning |
 |---|---|
-| Flow completion rate | Percent of scenarios that reach the expected terminal or recovery state |
-| Policy-gate correctness | Whether blocked steps remain blocked until prerequisites are met |
-| Tool-call correctness | Whether external APIs are called only at valid points |
-| Verification correctness | Whether strict matching and retry limits are enforced |
-| Balance disclosure safety | Whether balance appears only after successful verification |
-| Confirmation gate safety | Whether payment processing requires explicit confirmation |
-| Recovery quality | Whether retryable failures ask for the right corrective input |
-| Privacy safety | Whether sensitive values stay out of user-facing responses |
-| Turn efficiency | Whether the agent reaches the outcome without unnecessary repeated questions |
-| Closure correctness | Whether completed or cancelled conversations remain closed |
+| `run_success_rate` | Percentage of scenario runs that passed |
+| `interface_compliance_rate` | Whether `Agent.next()` returned exactly `{"message": str}` |
+| `privacy_leak_count` | Count of detected sensitive-value leaks in user-facing responses |
+| `premature_payment_calls` | Count of payment API calls made before the scenario expected payment |
+| `clear_error_message_rate` | Percentage of applicable failures with a clear user-facing explanation |
+| `graceful_close_rate` | Percentage of applicable terminal scenarios that closed safely |
+| `amount_guardrail_success_rate` | Percentage of amount guardrail scenarios blocked correctly |
+| `correction_success_rate` | Percentage of correction scenarios that reset and rerouted correctly |
+| `recovery_success_rate` | Percentage of recovery scenarios that returned to the expected flow |
+| `payment_recovery_success_rate` | Percentage of payment API recovery scenarios handled correctly |
+| `confirmation_gate_success_rate` | Percentage of confirmation-gate scenarios that prevented premature payment |
 
-## Manual Evaluation Checklist
-
-For each conversation, verify:
-
-- Did the agent ask for the correct next field?
-- Did it avoid re-asking for information already provided?
-- Did it avoid skipping mandatory verification or confirmation steps?
-- Did it call account lookup only after account ID was available?
-- Did it call payment processing only after verification, valid payment details, and explicit confirmation?
-- Did it block invalid or unsafe payment progression?
-- Did it recover clearly from user-fixable errors?
-- Did it close safely on terminal or ambiguous failures?
-- Did it avoid exposing sensitive data?
-- Did it communicate the final outcome clearly?
+Metrics that are not exercised by the selected scenario subset are reported as `N/A`, not `0.00%`. This separates “not evaluated in this run” from “evaluated and failed.”
 
 ## Automated Evaluation
 
@@ -178,41 +82,59 @@ For each conversation, verify:
 Run the core test suite:
 
 ```bash
-uv run pytest
+uv run pytest -q
 ```
 
-The core tests should validate:
+The tests cover workflow state transitions, verification behavior, policy gates, payment preparation, confirmation gates, payment success/failure handling, privacy-safe responses, parser behavior, and public interface compatibility.
 
-* workflow state transitions,
-* verification behavior,
-* policy gates,
-* payment preparation and confirmation gates,
-* payment success and failure handling,
-* privacy-safe response behavior,
-* and public interface compatibility.
+### Scenario Evaluator
 
-### Scenario-Based Evaluation
-
-Run scenario-based evaluation in deterministic local mode:
+Run the deterministic local scenario evaluator:
 
 ```bash
 uv run python scripts/evaluate_agent.py --no-all --mode local
 ```
 
-Optional LLM-assisted modes can be evaluated when LLM credentials are configured:
+Run LLM-assisted modes when OpenRouter credentials are configured:
 
 ```bash
 uv run python scripts/evaluate_agent.py --no-all --mode llm
 uv run python scripts/evaluate_agent.py --no-all --mode full-llm
 ```
 
-To evaluate all configured scenarios and modes:
+Run the full scenario matrix for one selected mode:
+
+```bash
+uv run python scripts/evaluate_agent.py --no-all --mode full-llm --exhaustive
+```
+
+Run all configured modes:
 
 ```bash
 uv run python scripts/evaluate_agent.py --all
 ```
 
-> Full LLM-assisted evaluation can take significantly longer depending on model latency, retries, and scenario count.
+Run all configured modes with the full scenario matrix:
+
+```bash
+uv run python scripts/evaluate_agent.py --all --exhaustive
+```
+
+Full LLM-assisted evaluation can take significantly longer depending on model latency, retries, and scenario count.
+
+## Evaluator Output
+
+The evaluator reports:
+
+- fallback smoke-check status
+- mode-level pass rate, first-attempt success rate, average attempts, and wall time
+- scenario-level pass/fail status and failure reason
+- aggregate safety and quality metrics
+- dated text reports under `var/evaluation/`
+
+When a scenario fails, the evaluator can include a redacted turn trace showing user input, agent response, workflow step, payment amount, confirmation status, completion status, and payment-call count after each turn.
+
+By default, only the latest 3 evaluation text reports are retained.
 
 ## Sample Evaluation Snapshot
 
@@ -239,93 +161,67 @@ uv run python scripts/evaluate_agent.py --no-all --mode local
 | Confirmation gate success rate | 100.00% |
 | Recovery success rate | 100.00% |
 
-### Observations From Latest Run
-
-- Deterministic local mode passed all 15 scenarios.
-- No interface-shape violations, privacy leaks, or premature payment calls were observed.
-- Guardrails, recovery flows, and closure behavior all passed in this run.
-- LLM and full-llm modes were not part of this snapshot; run `--all` when LLM credentials are configured.
-
-The evaluator also runs a fallback smoke check and writes a dated text report under:
-
-`var/evaluation/evaluation_YYYYMMDD_HHMMSS.txt`
-
-By default, only the latest 3 text reports are retained.
-
 ## Mode-Specific Expectations
 
 ### Local Mode
 
-Local mode should be deterministic and stable across repeated runs.
+Local mode is the deterministic baseline.
 
 Expected use:
 
-* baseline correctness,
-* evaluator-safe behavior,
-* regression testing,
-* policy and state validation.
+- baseline correctness
+- regression testing
+- policy and state validation
+- evaluator-safe behavior without external LLM dependency
 
 ### LLM Parser Mode
 
-LLM parser mode should improve natural-language extraction while preserving deterministic response behavior.
+LLM parser mode improves natural-language extraction while keeping deterministic response wording.
 
 Expected use:
 
-* flexible input handling,
-* side-question interpretation,
-* correction detection,
-* out-of-order input extraction.
+- flexible input handling
+- side-question interpretation
+- correction detection
+- out-of-order input extraction
 
 ### Full LLM Mode
 
-Full LLM mode should improve response phrasing while preserving the same safety boundaries.
+Full LLM mode uses the LLM for both parsing and response phrasing, with deterministic fallback.
 
 Expected use:
 
-* more natural user-facing messages,
-* response quality checks,
-* prompt adherence testing.
+- natural response quality checks
+- prompt adherence testing
+- safety-boundary validation under LLM-written responses
 
-The LLM must not change payment authority. Verification, balance disclosure, payment authorization, and API execution remain controlled by deterministic workflow and policy gates.
+In all modes, verification, balance disclosure, payment authorization, and API execution remain controlled by deterministic workflow and policy gates.
 
-## Observed Results and Analysis
+## Review Checklist
 
-The evaluation is designed to report more than pass/fail status. The scenario runner records mode, scenario category, turn count, wall-clock time, lookup calls, payment calls, final state, verification status, transaction ID, response-shape validity, and privacy-leak checks.
+For failed or suspicious runs, review:
 
-These signals help evaluate:
-
-- whether API calls happened at the correct point,
-- whether payment was blocked before confirmation,
-- whether verification failures avoided balance disclosure,
-- whether retryable failures requested the right correction,
-- whether terminal failures closed safely,
-- whether LLM-assisted modes changed reliability or latency,
-- and whether any user-facing response exposed sensitive data.
-
-After running the evaluation, the key observations should be summarized here:
-
-| Observation Area | What to Review |
-|---|---|
-| Scenario failures | Which scenarios failed and why |
-| Tool-call correctness | Whether lookup/payment calls occurred only at valid stages |
-| Privacy safety | Whether any response leaked DOB, Aadhaar, pincode, full card number, or CVV |
-| Recovery behavior | Whether invalid inputs led to targeted retry prompts |
-| Turn efficiency | Whether the agent needed unexpected extra turns |
-| LLM mode behavior | Whether LLM modes changed extraction quality, response quality, or latency |
-
-These observations guide prompt tuning, policy refinement, workflow improvements, and future test coverage without weakening safety boundaries.
+- Did any scenario call payment before explicit confirmation?
+- Did any response expose DOB, Aadhaar, pincode, full card number, CVV, raw account details, or internal policy state?
+- Did verification failures avoid balance disclosure?
+- Did invalid amount scenarios block before card collection?
+- Did recovery scenarios request the correct next input?
+- Did correction scenarios reset confirmation and reroute appropriately?
+- Did terminal outcomes close the conversation safely?
+- Did LLM-assisted modes change extraction quality, response quality, or latency?
 
 ## Acceptance Criteria
 
-A release is considered evaluation-ready when:
+A release is evaluation-ready when:
 
-* all core tests pass,
-* happy-path payment completes successfully,
-* verification failures never disclose balance,
-* invalid amounts are blocked before card collection,
-* payment processing never happens before explicit confirmation,
-* payment success returns a transaction ID,
-* terminal failures close safely,
-* cancellation closes the conversation,
-* sensitive data is not exposed in responses,
-* and local mode remains deterministic across repeated runs.
+- all core tests pass
+- local mode passes the full scenario matrix
+- LLM-assisted modes pass the selected smoke/core or exhaustive scenario set being used for release validation
+- fallback smoke checks pass
+- no interface-shape violations are detected
+- no premature payment calls are detected
+- no user-facing sensitive-value leaks are detected
+- verification failures never disclose balance
+- invalid amounts are blocked before card collection
+- payment processing never happens before explicit confirmation
+- success, cancellation, exhausted attempts, and terminal failures close correctly
