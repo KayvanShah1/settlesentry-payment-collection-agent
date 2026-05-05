@@ -6,7 +6,7 @@ class AgentMode(StrEnum):
     DETERMINISTIC_WORKFLOW = auto()
     LLM_PARSER_WORKFLOW = auto()
     LLM_PARSER_RESPONDER_WORKFLOW = auto()
-    LLM_AUTONOMOUS_AGENT = auto()
+    LLM_TOOL_AGENT = auto()
 
 
 @dataclass(frozen=True)
@@ -21,5 +21,5 @@ MODE_PROFILES = {
     AgentMode.LLM_PARSER_RESPONDER_WORKFLOW: ModeProfile(
         mode=AgentMode.LLM_PARSER_RESPONDER_WORKFLOW, grouped_card_collection=True
     ),
-    AgentMode.LLM_AUTONOMOUS_AGENT: ModeProfile(mode=AgentMode.LLM_AUTONOMOUS_AGENT, grouped_card_collection=True),
+    AgentMode.LLM_TOOL_AGENT: ModeProfile(mode=AgentMode.LLM_TOOL_AGENT, grouped_card_collection=True),
 }
