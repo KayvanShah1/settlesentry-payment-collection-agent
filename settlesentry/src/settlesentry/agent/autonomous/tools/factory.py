@@ -1,4 +1,4 @@
-from __future__ import annotations
+from enum import StrEnum, auto
 
 from pydantic_ai import CombinedToolset
 
@@ -13,8 +13,37 @@ from settlesentry.agent.autonomous.tools.payment import (
 from settlesentry.agent.deps import AgentDeps
 
 
+class ToolSurfacePhase(StrEnum):
+    CLOSED = auto()
+    ACCOUNT = auto()
+    IDENTITY = auto()
+    AMOUNT = auto()
+    CARD = auto()
+    CONFIRMATION = auto()
+
+
+def current_phase(deps: AgentDeps) -> ToolSurfacePhase:
+    state = deps.state
+
+    if state.completed:
+        return ToolSurfacePhase.CLOSED
+
+    if not state.account_id or not state.has_account_loaded():
+        return ToolSurfacePhase.ACCOUNT
+
+    if not state.verified:
+        return ToolSurfacePhase.IDENTITY
+
+    if state.payment_amount is None:
+        return ToolSurfacePhase.AMOUNT
+
+    if not state.has_complete_card_fields():
+        return ToolSurfacePhase.CARD
+
+    return ToolSurfacePhase.CONFIRMATION
+
+
 def all_toolsets() -> CombinedToolset:
-    """Expose the full autonomous action surface."""
     return CombinedToolset(
         [
             lifecycle_toolset,
@@ -28,36 +57,13 @@ def all_toolsets() -> CombinedToolset:
 
 
 def available_toolsets(deps: AgentDeps) -> CombinedToolset:
-    """Expose only currently relevant tool groups.
+    phase_tools = {
+        ToolSurfacePhase.CLOSED: (),
+        ToolSurfacePhase.ACCOUNT: (account_toolset,),
+        ToolSurfacePhase.IDENTITY: (identity_toolset,),
+        ToolSurfacePhase.AMOUNT: (amount_toolset,),
+        ToolSurfacePhase.CARD: (card_toolset,),
+        ToolSurfacePhase.CONFIRMATION: (card_toolset, confirmation_toolset),
+    }
 
-    This filters the action surface. It does not choose the next action.
-    The LLM still decides which available tool to call, or whether to ask.
-    """
-    state = deps.state
-    toolsets = [lifecycle_toolset]
-
-    if state.completed:
-        return CombinedToolset(toolsets)
-
-    if not state.account_id or not state.has_account_loaded():
-        toolsets.append(account_toolset)
-        return CombinedToolset(toolsets)
-
-    if state.has_account_loaded() and not state.verified:
-        toolsets.append(identity_toolset)
-        return CombinedToolset(toolsets)
-
-    if state.verified and state.payment_amount is None:
-        toolsets.append(amount_toolset)
-        return CombinedToolset(toolsets)
-
-    if state.verified and state.payment_amount is not None and not state.has_complete_card_fields():
-        toolsets.append(card_toolset)
-        return CombinedToolset(toolsets)
-
-    if state.verified and state.payment_amount is not None and state.has_complete_card_fields():
-        toolsets.append(card_toolset)
-        toolsets.append(confirmation_toolset)
-        return CombinedToolset(toolsets)
-
-    return CombinedToolset(toolsets)
+    return CombinedToolset([lifecycle_toolset, *phase_tools[current_phase(deps)]])
