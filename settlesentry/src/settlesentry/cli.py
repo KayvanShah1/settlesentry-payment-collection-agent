@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated
+from typing import Annotated, TypeAlias
 
 import typer
 from rich.console import Console
@@ -12,10 +12,31 @@ from settlesentry.agent.modes import LLM_REQUIRED_MODES, AgentMode, mode_profile
 app = typer.Typer(
     help="SettleSentry payment collection agent CLI.",
     no_args_is_help=False,
-    invoke_without_command=True,
 )
 
 console = Console()
+
+DEFAULT_MODE = AgentMode.LLM_PARSER_WORKFLOW
+
+ModeOption: TypeAlias = Annotated[
+    AgentMode,
+    typer.Option(
+        "--mode",
+        "-m",
+        help=(
+            "Agent mode: deterministic-workflow, llm-parser-workflow, "
+            "llm-parser-responder-workflow, or llm-autonomous-agent."
+        ),
+    ),
+]
+
+ShowStateOption: TypeAlias = Annotated[
+    bool, typer.Option("--show-state", help="Print privacy-safe state after each turn.")
+]
+
+DebugLogsOption: TypeAlias = Annotated[
+    bool, typer.Option("--debug-logs", help="Show internal application logs in the console.")
+]
 
 
 def configure_console_logging(debug_logs: bool) -> None:
@@ -188,33 +209,27 @@ def run_chat(
         )
 
 
-@app.command(invoke_without_command=True)
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    mode: ModeOption = DEFAULT_MODE,
+    show_state: ShowStateOption = False,
+    debug_logs: DebugLogsOption = False,
+) -> None:
+    """Run interactive chat when no subcommand is provided."""
+    if ctx.invoked_subcommand is None:
+        run_chat(
+            mode=mode,
+            show_state=show_state,
+            debug_logs=debug_logs,
+        )
+
+
+@app.command()
 def chat(
-    mode: Annotated[
-        AgentMode,
-        typer.Option(
-            "--mode",
-            "-m",
-            help=(
-                "Agent mode: deterministic-workflow, llm-parser-workflow, "
-                "llm-parser-responder-workflow, or llm-autonomous-agent."
-            ),
-        ),
-    ] = AgentMode.LLM_PARSER_WORKFLOW,
-    show_state: Annotated[
-        bool,
-        typer.Option(
-            "--show-state",
-            help="Print privacy-safe state after each turn.",
-        ),
-    ] = False,
-    debug_logs: Annotated[
-        bool,
-        typer.Option(
-            "--debug-logs",
-            help="Show internal application logs in the console.",
-        ),
-    ] = False,
+    mode: ModeOption = DEFAULT_MODE,
+    show_state: ShowStateOption = False,
+    debug_logs: DebugLogsOption = False,
 ) -> None:
     """
     Run the payment collection agent interactively.
