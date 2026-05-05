@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+from pydantic_ai import FunctionToolset, RunContext
+
+from settlesentry.agent.autonomous.tools.common import (
+    safe_tool_result,
+    tool_options,
+    verified_balance_facts,
+)
+from settlesentry.agent.deps import AgentDeps
+from settlesentry.agent.workflow.helpers import (
+    clear_payment_secrets,
+)
+from settlesentry.agent.workflow.helpers import (
+    result as workflow_result,
+)
+from settlesentry.agent.workflow.operations import greet_user
+from settlesentry.agent.workflow.routing import required_fields
+from settlesentry.core import OperationLogContext
+
+LIFECYCLE_TOOL_INSTRUCTIONS = """
+Use lifecycle tools to start the flow, check safe progress, or close the payment flow.
+
+Use start_payment_flow for greetings or vague payment starts.
+Use get_current_status for progress, pending fields, or safe status questions.
+Use cancel_flow when the user wants to stop, cancel, exit, or decline.
+
+After cancellation or closure, do not collect more information.
+""".strip()
+
+
+lifecycle_toolset = FunctionToolset(
+    instructions=LIFECYCLE_TOOL_INSTRUCTIONS,
+    include_return_schema=True,
+    sequential=True,
+)
+
+
+@lifecycle_toolset.tool(
+    name="start_payment_flow",
+    **tool_options(
+        description="Start the payment flow and request account ID.",
+        category="lifecycle",
+        timeout=3.0,
+        mutates_state=True,
+    ),
+)
+def start_payment_flow(ctx: RunContext[AgentDeps]) -> object:
+    return greet_user(ctx.deps)
+
+
+@lifecycle_toolset.tool(
+    name="get_current_status",
+    **tool_options(
+        description="Return safe current workflow status and pending fields.",
+        category="lifecycle",
+        timeout=3.0,
+    ),
+)
+def get_current_status(ctx: RunContext[AgentDeps]) -> object:
+    deps = ctx.deps
+
+    return safe_tool_result(
+        deps,
+        ok=True,
+        status="current_status",
+        required_fields=required_fields(deps),
+        facts=verified_balance_facts(deps),
+    )
+
+
+@lifecycle_toolset.tool(
+    name="cancel_flow",
+    **tool_options(
+        description="Cancel and close the flow without processing payment.",
+        category="lifecycle",
+        sensitivity="medium",
+        timeout=3.0,
+        mutates_state=True,
+        terminal=True,
+    ),
+)
+def cancel_flow(ctx: RunContext[AgentDeps]) -> object:
+    deps = ctx.deps
+    operation = OperationLogContext(operation="cancel_flow")
+
+    deps.state.payment_confirmed = False
+    deps.state.mark_closed()
+    clear_payment_secrets(deps)
+
+    return workflow_result(
+        deps,
+        operation,
+        ok=True,
+        status="cancelled",
+    )
