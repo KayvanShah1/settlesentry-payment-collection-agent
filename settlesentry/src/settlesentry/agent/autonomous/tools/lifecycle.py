@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic_ai import FunctionToolset, RunContext
 
 from settlesentry.agent.autonomous.tools.common import (
+    log_tool_call,
     safe_tool_result,
     tool_options,
     verified_balance_facts,
@@ -41,6 +42,7 @@ lifecycle_toolset = FunctionToolset(
         mutates_state=True,
     ),
 )
+@log_tool_call(tool_name="start_payment_flow", category="lifecycle")
 def start_payment_flow(ctx: RunContext[AgentDeps]) -> object:
     return greet_user(ctx.deps)
 
@@ -53,6 +55,7 @@ def start_payment_flow(ctx: RunContext[AgentDeps]) -> object:
         timeout=3.0,
     ),
 )
+@log_tool_call(tool_name="get_current_status", category="lifecycle")
 def get_current_status(ctx: RunContext[AgentDeps]) -> object:
     deps = ctx.deps
 
@@ -76,6 +79,7 @@ def get_current_status(ctx: RunContext[AgentDeps]) -> object:
         terminal=True,
     ),
 )
+@log_tool_call(tool_name="cancel_flow", category="lifecycle")
 def cancel_flow(ctx: RunContext[AgentDeps]) -> object:
     deps = ctx.deps
     operation = OperationLogContext(operation="cancel_flow")

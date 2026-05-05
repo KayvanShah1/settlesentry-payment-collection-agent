@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic_ai import FunctionToolset, RunContext
 
-from settlesentry.agent.autonomous.tools.common import tool_options
+from settlesentry.agent.autonomous.tools.common import log_tool_call, tool_options
 from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.state import ExtractedUserInput
 from settlesentry.agent.workflow.input import handle_correction
@@ -15,6 +15,12 @@ Full name alone is not enough. One secondary factor is required.
 The tool result is the only source of truth for verification.
 On failure, do not reveal which field failed; ask only for required_fields.
 If verification is exhausted, stop payment collection.
+
+Call provide_identity_details whenever the user provides any identity detail: full name, DOB, Aadhaar last 4 digits, or pincode.
+
+Partial identity submission is allowed. If only the full name is provided, call provide_identity_details with full_name and let the tool return the missing secondary factor.
+
+Do not ask for the next identity field based only on the user message without first calling the tool.
 """.strip()
 
 
@@ -34,6 +40,7 @@ identity_toolset = FunctionToolset(
         mutates_state=True,
     ),
 )
+@log_tool_call(tool_name="provide_identity_details", category="identity_verification")
 def provide_identity_details(
     ctx: RunContext[AgentDeps],
     full_name: str | None = None,

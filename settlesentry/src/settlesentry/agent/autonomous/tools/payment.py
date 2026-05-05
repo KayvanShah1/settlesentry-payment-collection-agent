@@ -4,15 +4,22 @@ from decimal import Decimal
 
 from pydantic_ai import FunctionToolset, RunContext
 
-from settlesentry.agent.autonomous.tools.common import card_last4_facts, safe_tool_result, tool_options
+from settlesentry.agent.autonomous.tools.common import (
+    log_tool_call,
+    tool_options,
+)
 from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.state import ExtractedUserInput
-from settlesentry.agent.workflow.helpers import clear_payment_secrets, validate_payment_amount
+from settlesentry.agent.workflow.helpers import clear_payment_secrets
 from settlesentry.agent.workflow.helpers import result as workflow_result
-from settlesentry.agent.workflow.input import handle_correction
+from settlesentry.agent.workflow.operations import (
+    capture_card_details,
+    capture_payment_amount,
+    prepare_payment,
+    process_payment,
+    recap_and_close,
+)
 from settlesentry.agent.workflow.operations import confirm_payment as confirm_payment_operation
-from settlesentry.agent.workflow.operations import prepare_payment, process_payment, recap_and_close
-from settlesentry.agent.workflow.routing import required_fields
 from settlesentry.core import OperationLogContext
 
 AMOUNT_TOOL_INSTRUCTIONS = """
@@ -57,31 +64,13 @@ amount_toolset = FunctionToolset(
         mutates_state=True,
     ),
 )
+@log_tool_call(tool_name="provide_payment_amount", category="payment_amount")
 def provide_payment_amount(
     ctx: RunContext[AgentDeps],
     amount: Decimal,
 ) -> object:
-    deps = ctx.deps
-    operation = OperationLogContext(operation="provide_payment_amount")
     extracted = ExtractedUserInput(payment_amount=amount)
-
-    if deps.state.payment_amount is not None and deps.state.payment_amount != amount:
-        corrected = handle_correction(deps, extracted)
-        if not corrected.ok:
-            return corrected
-    else:
-        deps.state.merge(extracted)
-
-    blocked = validate_payment_amount(deps, operation)
-    if blocked is not None:
-        return blocked
-
-    return safe_tool_result(
-        deps,
-        ok=True,
-        status="payment_amount_captured",
-        required_fields=required_fields(deps),
-    )
+    return capture_payment_amount(ctx.deps, extracted)
 
 
 card_toolset = FunctionToolset(
@@ -100,6 +89,7 @@ card_toolset = FunctionToolset(
         mutates_state=True,
     ),
 )
+@log_tool_call(tool_name="provide_card_details", category="card_details")
 def provide_card_details(
     ctx: RunContext[AgentDeps],
     cardholder_name: str | None = None,
@@ -108,16 +98,6 @@ def provide_card_details(
     expiry_year: int | None = None,
     cvv: str | None = None,
 ) -> object:
-    deps = ctx.deps
-
-    if not deps.state.verified or deps.state.payment_amount is None:
-        return safe_tool_result(
-            deps,
-            ok=False,
-            status="payment_amount_required",
-            required_fields=required_fields(deps),
-        )
-
     extracted = ExtractedUserInput(
         cardholder_name=cardholder_name.strip() if cardholder_name else None,
         card_number=card_number,
@@ -126,22 +106,7 @@ def provide_card_details(
         cvv=cvv,
     )
 
-    card_changed_after_confirmation = deps.state.payment_confirmed and any(
-        value is not None for value in (cardholder_name, card_number, expiry_month, expiry_year, cvv)
-    )
-
-    if card_changed_after_confirmation:
-        return handle_correction(deps, extracted)
-
-    deps.state.merge(extracted)
-
-    return safe_tool_result(
-        deps,
-        ok=True,
-        status="card_details_captured",
-        required_fields=required_fields(deps),
-        facts=card_last4_facts(deps),
-    )
+    return capture_card_details(ctx.deps, extracted)
 
 
 confirmation_toolset = FunctionToolset(
@@ -160,6 +125,7 @@ confirmation_toolset = FunctionToolset(
         mutates_state=True,
     ),
 )
+@log_tool_call(tool_name="prepare_payment_for_confirmation", category="payment_confirmation")
 def prepare_payment_for_confirmation(ctx: RunContext[AgentDeps]) -> object:
     return prepare_payment(ctx.deps)
 
@@ -176,6 +142,7 @@ def prepare_payment_for_confirmation(ctx: RunContext[AgentDeps]) -> object:
         moves_money=True,
     ),
 )
+@log_tool_call(tool_name="confirm_and_process_payment", category="payment_processing")
 def confirm_and_process_payment(ctx: RunContext[AgentDeps]) -> object:
     deps = ctx.deps
 
@@ -199,13 +166,14 @@ def confirm_and_process_payment(ctx: RunContext[AgentDeps]) -> object:
     name="decline_payment",
     **tool_options(
         description="Decline the prepared payment and close safely.",
-        category="payment_confirmation",
+        category="payment_processing",
         sensitivity="medium",
         timeout=3.0,
         mutates_state=True,
         terminal=True,
     ),
 )
+@log_tool_call(tool_name="decline_payment", category="payment_processing")
 def decline_payment(ctx: RunContext[AgentDeps]) -> object:
     deps = ctx.deps
     operation = OperationLogContext(operation="decline_payment")

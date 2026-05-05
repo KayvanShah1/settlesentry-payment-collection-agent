@@ -10,7 +10,7 @@ from settlesentry.agent.policy import (
     VERIFY_IDENTITY_POLICY,
     identity_matches_account,
 )
-from settlesentry.agent.state import ConversationStep
+from settlesentry.agent.state import ConversationStep, ExtractedUserInput
 from settlesentry.agent.workflow.constants import (
     AMOUNT_RETRY_ERRORS,
     LOOKUP_SERVICE_ERROR_STATUSES,
@@ -22,6 +22,7 @@ from settlesentry.agent.workflow.helpers import (
     clear_secondary_identity_inputs,
     policy_blocked,
     result,
+    validate_payment_amount,
 )
 from settlesentry.agent.workflow.result import AgentToolResult
 from settlesentry.agent.workflow.routing import (
@@ -167,6 +168,116 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
         status="identity_verification_failed",
         required_fields=fields,
         facts={"attempts_remaining": attempts_remaining},
+    )
+
+
+def capture_payment_amount(
+    deps: AgentDeps,
+    extracted: ExtractedUserInput,
+) -> AgentToolResult:
+    """Capture and validate payment amount, then sync the next required step."""
+    operation = OperationLogContext(operation="capture_payment_amount")
+
+    if deps.state.completed:
+        return result(deps, operation, ok=False, status="conversation_closed")
+
+    if extracted.payment_amount is None:
+        fields = required_fields(deps)
+        set_step_from_required_fields(deps, fields)
+
+        return result(
+            deps,
+            operation,
+            ok=False,
+            status="missing_payment_amount",
+            required_fields=fields,
+        )
+
+    deps.state.merge(extracted.model_copy(update={"confirmation": None}))
+
+    blocked = validate_payment_amount(deps, operation)
+    if blocked is not None:
+        return blocked
+
+    fields = required_fields(deps)
+    node = recommended_node(deps)
+    set_step_from_required_fields(deps, fields)
+
+    return result(
+        deps,
+        operation,
+        ok=True,
+        status="payment_amount_captured",
+        required_fields=fields,
+        recommended_tool=node,
+    )
+
+
+def capture_card_details(
+    deps: AgentDeps,
+    extracted: ExtractedUserInput,
+) -> AgentToolResult:
+    """Capture partial or complete card details, then sync the next required step."""
+    operation = OperationLogContext(operation="capture_card_details")
+
+    if deps.state.completed:
+        return result(deps, operation, ok=False, status="conversation_closed")
+
+    has_card_detail = any(
+        getattr(extracted, field) is not None
+        for field in (
+            "cardholder_name",
+            "card_number",
+            "cvv",
+            "expiry_month",
+            "expiry_year",
+        )
+    )
+
+    if not has_card_detail:
+        fields = required_fields(deps)
+        set_step_from_required_fields(deps, fields)
+
+        return result(
+            deps,
+            operation,
+            ok=False,
+            status="missing_card_fields",
+            required_fields=fields,
+        )
+
+    if not deps.state.verified or deps.state.payment_amount is None:
+        fields = required_fields(deps)
+        set_step_from_required_fields(deps, fields)
+
+        return result(
+            deps,
+            operation,
+            ok=False,
+            status="payment_amount_required",
+            required_fields=fields,
+        )
+
+    deps.state.merge(extracted.model_copy(update={"confirmation": None}))
+
+    fields = required_fields(deps)
+    node = recommended_node(deps)
+    set_step_from_required_fields(deps, fields)
+
+    facts: dict[str, object] = {}
+
+    card_last4 = deps.state.card_last4()
+    if card_last4:
+        facts["card_last4"] = card_last4
+
+    return result(
+        deps,
+        operation,
+        ok=True,
+        status="card_details_captured",
+        required_fields=fields,
+        recommended_tool=node,
+        facts=facts,
     )
 
 

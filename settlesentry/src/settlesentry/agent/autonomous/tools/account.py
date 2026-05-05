@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic_ai import FunctionToolset, RunContext
 
-from settlesentry.agent.autonomous.tools.common import tool_options
+from settlesentry.agent.autonomous.tools.common import log_tool_call, tool_options
 from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.state import ExtractedUserInput
 from settlesentry.agent.workflow.input import handle_correction
@@ -34,6 +34,7 @@ account_toolset = FunctionToolset(
         calls_external_api=True,
     ),
 )
+@log_tool_call(tool_name="provide_account_id", category="account_lookup")
 def provide_account_id(
     ctx: RunContext[AgentDeps],
     account_id: str,
