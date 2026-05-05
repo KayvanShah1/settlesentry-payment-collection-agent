@@ -1,7 +1,3 @@
-from __future__ import annotations
-
-from typing import Any
-
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.providers.openrouter import OpenRouterProvider
@@ -36,7 +32,7 @@ class AutonomousAgentRuntime:
                 ),
             ),
             deps_type=AgentDeps,
-            output_type=MessageResponse,
+            output_type=str,
             instructions=AUTONOMOUS_AGENT_INSTRUCTIONS,
             name="AutonomousPaymentAgent",
             retries=settings.llm.retries,
@@ -49,11 +45,11 @@ class AutonomousAgentRuntime:
         result = self.agent.run_sync(
             payload.model_dump_json(indent=2),
             deps=deps,
-            toolsets=available_toolsets(deps),
+            toolsets=[available_toolsets(deps)],
         )
 
-        response = self._coerce_message_response(result)
-        message = response.message.strip()
+        message = str(result.output).strip()
+        message = MessageResponse(message=message).message
 
         logger.info(
             "autonomous_llm_turn_completed",
@@ -65,18 +61,3 @@ class AutonomousAgentRuntime:
         )
 
         return message
-
-    @staticmethod
-    def _coerce_message_response(result: object) -> MessageResponse:
-        output: Any = getattr(result, "output", None)
-
-        if output is None:
-            output = getattr(result, "data", None)
-
-        if isinstance(output, MessageResponse):
-            return output
-
-        return MessageResponse.model_validate(output)
-
-
-__all__ = ["AutonomousAgentRuntime"]
