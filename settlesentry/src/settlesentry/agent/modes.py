@@ -6,7 +6,7 @@ class AgentMode(StrEnum):
     DETERMINISTIC_WORKFLOW = "deterministic-workflow"
     LLM_PARSER_WORKFLOW = "llm-parser-workflow"
     LLM_PARSER_RESPONDER_WORKFLOW = "llm-parser-responder-workflow"
-    LLM_TOOL_AGENT = "llm-tool-agent"
+    LLM_AUTONOMOUS_AGENT = "llm-autonomous-agent"
 
 
 @dataclass(frozen=True)
@@ -36,12 +36,12 @@ MODE_PROFILES: dict[AgentMode, ModeProfile] = {
         requires_llm=True,
         description="LLM parser/responder workflow: LLM parser and LLM-written responses.",
     ),
-    AgentMode.LLM_TOOL_AGENT: ModeProfile(
-        mode=AgentMode.LLM_TOOL_AGENT,
+    AgentMode.LLM_AUTONOMOUS_AGENT: ModeProfile(
+        mode=AgentMode.LLM_AUTONOMOUS_AGENT,
         grouped_card_collection=True,
         requires_llm=True,
         description=(
-            "LLM tool-agent workflow: LLM-led conversation and tool orchestration over policy-gated payment operations."
+            "LLM autonomous agent workflow: LLM-led conversation and tool orchestration over policy-gated payment operations."
         ),
     ),
 }
