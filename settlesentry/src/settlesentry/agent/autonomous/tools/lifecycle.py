@@ -8,12 +8,8 @@ from settlesentry.agent.autonomous.tools.common import (
     verified_balance_facts,
 )
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.workflow.helpers import (
-    clear_payment_secrets,
-)
-from settlesentry.agent.workflow.helpers import (
-    result as workflow_result,
-)
+from settlesentry.agent.workflow.helpers import clear_payment_secrets
+from settlesentry.agent.workflow.helpers import result as workflow_result
 from settlesentry.agent.workflow.operations import greet_user
 from settlesentry.agent.workflow.routing import required_fields
 from settlesentry.core import OperationLogContext

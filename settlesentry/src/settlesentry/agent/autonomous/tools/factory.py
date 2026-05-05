@@ -5,11 +5,7 @@ from pydantic_ai import CombinedToolset
 from settlesentry.agent.autonomous.tools.account import account_toolset
 from settlesentry.agent.autonomous.tools.identity import identity_toolset
 from settlesentry.agent.autonomous.tools.lifecycle import lifecycle_toolset
-from settlesentry.agent.autonomous.tools.payment import (
-    amount_toolset,
-    card_toolset,
-    confirmation_toolset,
-)
+from settlesentry.agent.autonomous.tools.payment import amount_toolset, card_toolset, confirmation_toolset
 from settlesentry.agent.deps import AgentDeps
 
 

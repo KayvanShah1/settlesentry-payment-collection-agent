@@ -4,29 +4,14 @@ from decimal import Decimal
 
 from pydantic_ai import FunctionToolset, RunContext
 
-from settlesentry.agent.autonomous.tools.common import (
-    card_last4_facts,
-    safe_tool_result,
-    tool_options,
-)
+from settlesentry.agent.autonomous.tools.common import card_last4_facts, safe_tool_result, tool_options
 from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.state import ExtractedUserInput
-from settlesentry.agent.workflow.helpers import (
-    clear_payment_secrets,
-    validate_payment_amount,
-)
-from settlesentry.agent.workflow.helpers import (
-    result as workflow_result,
-)
+from settlesentry.agent.workflow.helpers import clear_payment_secrets, validate_payment_amount
+from settlesentry.agent.workflow.helpers import result as workflow_result
 from settlesentry.agent.workflow.input import handle_correction
-from settlesentry.agent.workflow.operations import (
-    confirm_payment as confirm_payment_operation,
-)
-from settlesentry.agent.workflow.operations import (
-    prepare_payment,
-    process_payment,
-    recap_and_close,
-)
+from settlesentry.agent.workflow.operations import confirm_payment as confirm_payment_operation
+from settlesentry.agent.workflow.operations import prepare_payment, process_payment, recap_and_close
 from settlesentry.agent.workflow.routing import required_fields
 from settlesentry.core import OperationLogContext
 
@@ -124,6 +109,14 @@ def provide_card_details(
     cvv: str | None = None,
 ) -> object:
     deps = ctx.deps
+
+    if not deps.state.verified or deps.state.payment_amount is None:
+        return safe_tool_result(
+            deps,
+            ok=False,
+            status="payment_amount_required",
+            required_fields=required_fields(deps),
+        )
 
     extracted = ExtractedUserInput(
         cardholder_name=cardholder_name.strip() if cardholder_name else None,
