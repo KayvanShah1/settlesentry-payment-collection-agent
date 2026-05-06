@@ -16,11 +16,21 @@ from settlesentry.agent.workflow.routing import required_fields
 from settlesentry.core import OperationLogContext
 
 LIFECYCLE_TOOL_INSTRUCTIONS = """
-Use lifecycle tools to start the flow, check safe progress, or close the payment flow.
+Use lifecycle tools for greetings, vague starts, safe progress checks, cancellation, or closure.
 
-Use start_payment_flow for greetings or vague payment starts.
-Use get_current_status for progress, pending fields, or safe status questions.
-Use cancel_flow when the user wants to stop, cancel, exit, or decline.
+Use start_payment_flow when:
+- the customer greets the assistant
+- the customer asks to start payment without providing actionable details
+- the flow has not started and account ID is needed
+
+Use get_current_status when:
+- the customer asks what is pending
+- the customer asks where they are in the flow
+- the customer asks a safe status question
+
+Use cancel_flow when:
+- the customer asks to cancel, stop, exit, decline, or end the payment flow
+- the customer refuses to continue before payment processing
 
 After cancellation or closure, do not collect more information.
 """.strip()

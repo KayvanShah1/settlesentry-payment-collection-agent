@@ -5,14 +5,19 @@ from pydantic_ai import FunctionToolset, RunContext
 from settlesentry.agent.autonomous.tools.common import log_tool_call, tool_options
 from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.state import ExtractedUserInput
-from settlesentry.agent.workflow.input import handle_correction
+from settlesentry.agent.workflow.helpers import clear_account_context
 from settlesentry.agent.workflow.operations import lookup_account
 
 ACCOUNT_TOOL_INSTRUCTIONS = """
-Use account tools when the user provides an account ID.
+Use account tools when the customer provides an account ID or corrects a previous account ID.
 
-Account IDs are opaque. Do not correct, normalize, or infer missing characters.
-Only say the account was found if the tool returns account_loaded.
+Account IDs are opaque:
+- submit the account ID exactly as provided after trimming surrounding whitespace
+- do not infer, autocorrect, normalize case, or add missing characters
+- do not claim the account was found unless the tool returns account_loaded
+
+If lookup fails with account_not_found, the next account ID provided by the customer must be submitted for a fresh lookup, not treated as a completed correction.
+Changing account ID invalidates downstream identity and payment context.
 """.strip()
 
 
@@ -42,10 +47,9 @@ def provide_account_id(
     deps = ctx.deps
     normalized_account_id = account_id.strip()
 
-    extracted = ExtractedUserInput(account_id=normalized_account_id)
-
     if deps.state.account_id and deps.state.account_id != normalized_account_id:
-        return handle_correction(deps, extracted)
+        clear_account_context(deps)
 
+    extracted = ExtractedUserInput(account_id=normalized_account_id)
     deps.state.merge(extracted)
     return lookup_account(deps)

@@ -9,18 +9,23 @@ from settlesentry.agent.workflow.input import handle_correction
 from settlesentry.agent.workflow.operations import verify_identity
 
 IDENTITY_TOOL_INSTRUCTIONS = """
-Use identity tools when the user provides full name, DOB, Aadhaar last 4, or pincode.
+Use identity tools when the customer provides full name, DOB, Aadhaar last 4 digits, or pincode during identity verification.
 
-Full name alone is not enough. One secondary factor is required.
+Call provide_identity_details whenever any identity detail is provided:
+- full name alone is allowed
+- secondary factor alone is allowed if full name is already stored
+- full name plus secondary factor together is allowed
+- corrected identity details must be submitted through the tool
+
+Full name alone is not enough to verify identity. One secondary factor is required.
 The tool result is the only source of truth for verification.
-On failure, do not reveal which field failed; ask only for required_fields.
-If verification is exhausted, stop payment collection.
 
-Call provide_identity_details whenever the user provides any identity detail: full name, DOB, Aadhaar last 4 digits, or pincode.
+On identity failure:
+- do not reveal which field was incorrect
+- do not reveal balance
+- follow required_fields from the tool result
 
-Partial identity submission is allowed. If only the full name is provided, call provide_identity_details with full_name and let the tool return the missing secondary factor.
-
-Do not ask for the next identity field based only on the user message without first calling the tool.
+If verification is exhausted, stop identity and payment collection.
 """.strip()
 
 

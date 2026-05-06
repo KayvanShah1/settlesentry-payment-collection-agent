@@ -23,28 +23,43 @@ from settlesentry.agent.workflow.operations import confirm_payment as confirm_pa
 from settlesentry.core import OperationLogContext
 
 AMOUNT_TOOL_INSTRUCTIONS = """
-Use amount tools after identity verification when the user provides the amount to pay.
+Use amount tools only after identity has been verified and the customer provides a payment amount.
 
-Do not treat verification factors as payment amounts.
-If amount validation fails, ask only for a corrected amount.
+Amount handling:
+- submit only the payment amount
+- do not treat verification factors, Aadhaar digits, pincode, CVV, expiry, or card numbers as payment amounts
+- do not accept an amount from earlier turns unless it is still present in safe state or tool context
+- if amount validation fails, ask only for a corrected amount
+
+The amount tool validates policy limits and outstanding-balance constraints.
 """.strip()
 
 
 CARD_TOOL_INSTRUCTIONS = """
-Use card tools after a valid payment amount has been accepted.
+Use card tools only after a valid payment amount has been accepted.
 
-Collect cardholder name, card number, expiry, and CVV.
-Never expose full card number or CVV back to the user.
-When card details are complete, prepare payment for confirmation.
+Card handling:
+- submit any provided cardholder name, card number, expiry, or CVV
+- partial card submission is allowed
+- parse expiry in MM/YYYY into expiry_month and expiry_year
+- never expose full card number or CVV back to the customer
+- never treat card submission as payment confirmation
+
+Card tools only collect or validate card details. They must not process payment.
 """.strip()
 
 
 CONFIRMATION_TOOL_INSTRUCTIONS = """
-Use confirmation tools to prepare, confirm, process, decline, or close payment.
+Use confirmation tools only after payment amount and required card details are complete.
 
-Prepare payment only after amount and card details are complete.
-Process payment only after explicit user confirmation.
-Only claim success if the tool returns payment_success or conversation_closed with transaction_id.
+Confirmation handling:
+- prepare payment only when complete payment details are ready for explicit confirmation
+- process payment only when the customer explicitly confirms with yes or equivalent clear approval
+- decline payment when the customer says no, cancel, stop, or refuses confirmation
+- do not infer confirmation from card details, amount entry, silence, or ambiguous replies
+
+Only claim payment success if the tool returns payment_success or conversation_closed with transaction_id.
+If processing fails or attempts are exhausted, do not retry automatically unless the tool explicitly keeps the flow open.
 """.strip()
 
 
