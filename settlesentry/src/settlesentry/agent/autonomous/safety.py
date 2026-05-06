@@ -4,6 +4,7 @@ import re
 from decimal import Decimal, InvalidOperation
 
 from settlesentry.agent.deps import AgentDeps
+from settlesentry.core import settings
 from settlesentry.security.cards import digits_only
 
 VERIFICATION_CLAIMS = (
@@ -61,6 +62,23 @@ def _contains_labeled_value(
     return re.search(rf"\b{re.escape(value)}\b", message) is not None
 
 
+def _mentions_verification_exhaustion(message: str) -> bool:
+    lowered = message.lower()
+
+    has_identity_context = "identity" in lowered or "verify" in lowered or "verification" in lowered
+
+    has_exhaustion_context = (
+        "multiple attempt" in lowered
+        or "attempts" in lowered
+        or "could not be verified" in lowered
+        or "unable to verify" in lowered
+        or "can't continue" in lowered
+        or "cannot continue" in lowered
+    )
+
+    return has_identity_context and has_exhaustion_context
+
+
 def audit_autonomous_message(deps: AgentDeps, message: str) -> tuple[bool, str]:
     """Audit the LLM-written final message before returning it to the user."""
     message_digits = digits_only(message)
@@ -100,6 +118,14 @@ def audit_autonomous_message(deps: AgentDeps, message: str) -> tuple[bool, str]:
 
     if not deps.state.transaction_id and _has_claim(message, PAYMENT_SUCCESS_CLAIMS):
         return False, "unsafe_payment_success_claim"
+
+    if (
+        deps.state.completed
+        and not deps.state.transaction_id
+        and deps.state.verification_attempts >= settings.agent_policy.verification_max_attempts
+        and not _mentions_verification_exhaustion(message)
+    ):
+        return False, "verification_exhausted"
 
     return True, "safe"
 
