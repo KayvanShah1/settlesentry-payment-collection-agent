@@ -527,10 +527,26 @@ def assert_full_balance_payment(
     )
 
 
+def has_account_not_found_message(records: list[TurnRecord]) -> bool:
+    patterns = (
+        r"could not find",
+        r"could not be found",
+        r"not found",
+        r"couldn't find",
+        r"unable to find",
+        r"unable to locate",
+    )
+
+    return any(
+        any(re.search(pattern, record.agent_message.lower()) for pattern in patterns)
+        for record in records
+    )
+
+
 def assert_account_not_found_recovery(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
-    has_clear_error = any("could not find" in record.agent_message.lower() for record in records)
+    has_clear_error = has_account_not_found_message(records)
 
     ok = (
         agent.state.has_account_loaded()
@@ -1200,6 +1216,7 @@ def build_failed_turn_trace_table(results: list[ScenarioResult], *, ascii_only: 
     table.add_column("Amount", style="white")
     table.add_column("Confirmed", style="white")
     table.add_column("Completed", style="white")
+    table.add_column("Lookup Calls", style="white")
     table.add_column("Payment Calls", style="white")
 
     for result in results:
@@ -1217,6 +1234,7 @@ def build_failed_turn_trace_table(results: list[ScenarioResult], *, ascii_only: 
                 record.payment_amount or "",
                 str(record.payment_confirmed),
                 str(record.completed),
+                str(record.lookup_calls),
                 str(record.payment_calls),
             )
 
@@ -1321,7 +1339,7 @@ def main(
             "-m",
             help=(
                 "Evaluation mode: deterministic-workflow, llm-parser-workflow, "
-                "llm-parser-responder-workflow, or llm-tool-agent."
+                "llm-parser-responder-workflow, or llm-autonomous-agent."
             ),
         ),
     ] = AgentMode.DETERMINISTIC_WORKFLOW.value,
@@ -1349,7 +1367,7 @@ def main(
         help="Run every scenario for every selected mode. Disabled by default to avoid excessive LLM calls.",
     ),
 ) -> None:
-    modes = resolve_modes(run_all=run_all, requested_mode=mode.value)
+    modes = resolve_modes(run_all=run_all, requested_mode=mode)
 
     results: list[ScenarioResult] = []
 
