@@ -432,3 +432,24 @@ def test_status_after_verification_may_include_balance_but_not_sensitive_fields(
     assert "400001" not in dumped_text
     assert "4532015112830366" not in dumped_text
     assert "123" not in dumped_text
+
+
+def test_provide_account_id_retries_valid_account_after_not_found(
+    deps: AgentDeps,
+    payments_client: FakePaymentsClient,
+):
+    first = provide_account_id(ctx(deps), account_id="ACC6986")
+
+    assert first.ok is False
+    assert first.status == "account_not_found"
+    assert first.required_fields == ("account_id",)
+    assert deps.state.has_account_loaded() is False
+
+    second = provide_account_id(ctx(deps), account_id="ACC1001")
+
+    assert second.ok is True
+    assert second.status == "account_loaded"
+    assert second.required_fields == ("full_name",)
+    assert deps.state.account_id == "ACC1001"
+    assert deps.state.has_account_loaded() is True
+    assert payments_client.lookup_calls == ["ACC6986", "ACC1001"]
