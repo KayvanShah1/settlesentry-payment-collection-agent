@@ -49,11 +49,22 @@ Card tools only collect or validate card details. They must not process payment.
 """.strip()
 
 
-CONFIRMATION_TOOL_INSTRUCTIONS = """
-Use confirmation tools only after payment amount and required card details are complete.
+PREPARE_CONFIRMATION_TOOL_INSTRUCTIONS = """
+Use the preparation tool only after payment amount and required card details are complete.
 
-Confirmation handling:
+Preparation handling:
 - prepare payment only when complete payment details are ready for explicit confirmation
+- do not process payment during preparation
+- do not infer confirmation from card details, amount entry, silence, or ambiguous replies
+
+Only claim payment readiness when the tool returns payment_ready_for_confirmation.
+""".strip()
+
+
+FINAL_CONFIRMATION_TOOL_INSTRUCTIONS = """
+Use final confirmation tools only when explicit confirmation handling is pending.
+
+Final confirmation handling:
 - process payment only when the customer explicitly confirms with yes or equivalent clear approval
 - decline payment when the customer says no, cancel, stop, or refuses confirmation
 - do not infer confirmation from card details, amount entry, silence, or ambiguous replies
@@ -124,14 +135,14 @@ def provide_card_details(
     return capture_card_details(ctx.deps, extracted)
 
 
-confirmation_toolset = FunctionToolset(
-    instructions=CONFIRMATION_TOOL_INSTRUCTIONS,
+prepare_confirmation_toolset = FunctionToolset(
+    instructions=PREPARE_CONFIRMATION_TOOL_INSTRUCTIONS,
     include_return_schema=True,
     sequential=True,
 )
 
 
-@confirmation_toolset.tool(
+@prepare_confirmation_toolset.tool(
     name="prepare_payment_for_confirmation",
     **tool_options(
         description="Stage complete payment details for explicit confirmation.",
@@ -145,7 +156,14 @@ def prepare_payment_for_confirmation(ctx: RunContext[AgentDeps]) -> object:
     return prepare_payment(ctx.deps)
 
 
-@confirmation_toolset.tool(
+final_confirmation_toolset = FunctionToolset(
+    instructions=FINAL_CONFIRMATION_TOOL_INSTRUCTIONS,
+    include_return_schema=True,
+    sequential=True,
+)
+
+
+@final_confirmation_toolset.tool(
     name="confirm_and_process_payment",
     **tool_options(
         description="Confirm and process the prepared payment.",
@@ -177,7 +195,7 @@ def confirm_and_process_payment(ctx: RunContext[AgentDeps]) -> object:
     return payment_result
 
 
-@confirmation_toolset.tool(
+@final_confirmation_toolset.tool(
     name="decline_payment",
     **tool_options(
         description="Decline the prepared payment and close safely.",

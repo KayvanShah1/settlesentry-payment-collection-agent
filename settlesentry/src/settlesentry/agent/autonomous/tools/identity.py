@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Annotated
+
+from pydantic import Field
 from pydantic_ai import FunctionToolset, RunContext
 
 from settlesentry.agent.autonomous.tools.common import log_tool_call, tool_options
@@ -16,6 +19,11 @@ Call provide_identity_details whenever any identity detail is provided:
 - secondary factor alone is allowed if full name is already stored
 - full name plus secondary factor together is allowed
 - corrected identity details must be submitted through the tool
+- when required_fields includes dob_or_aadhaar_last4_or_pincode, treat bare values as actionable:
+  - YYYY-MM-DD -> dob
+  - 4 digits -> aadhaar_last4
+  - 6 digits -> pincode
+- do not ask again when the customer provides one of those values; submit it through the tool
 
 Full name alone is not enough to verify identity. One secondary factor is required.
 The tool result is the only source of truth for verification.
@@ -48,10 +56,10 @@ identity_toolset = FunctionToolset(
 @log_tool_call(tool_name="provide_identity_details", category="identity_verification")
 def provide_identity_details(
     ctx: RunContext[AgentDeps],
-    full_name: str | None = None,
-    dob: str | None = None,
-    aadhaar_last4: str | None = None,
-    pincode: str | None = None,
+    full_name: Annotated[str | None, Field(description="Customer full name exactly as registered.")] = None,
+    dob: Annotated[str | None, Field(description="Date of birth in YYYY-MM-DD format.")] = None,
+    aadhaar_last4: Annotated[str | None, Field(description="Last 4 digits of Aadhaar.")] = None,
+    pincode: Annotated[str | None, Field(description="6-digit account pincode.")] = None,
 ) -> object:
     deps = ctx.deps
 
