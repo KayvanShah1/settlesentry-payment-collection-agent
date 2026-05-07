@@ -1008,6 +1008,14 @@ def filter_scenarios(
     if not selected_names:
         return scenarios
 
+    if isinstance(selected_names, str):
+        selected_names = [selected_names]
+
+    if not isinstance(selected_names, list):
+        raise TypeError(
+            f"selected_names must be list[str] | None, got {type(selected_names).__name__}"
+        )
+
     selected = set(selected_names)
     available = {scenario.name for scenario in scenarios}
     unknown = selected - available
@@ -1401,7 +1409,7 @@ def main(
         min=1,
         help="Repeats for llm and full-llm modes.",
     ),
-    scenario: Annotated[
+    scenario_names: Annotated[
         list[str] | None,
         typer.Option(
             "--scenario",
@@ -1429,7 +1437,7 @@ def main(
             llm_repeats if mode in {AgentMode.LLM_PARSER_WORKFLOW, AgentMode.LLM_PARSER_RESPONDER_WORKFLOW} else repeats
         )
 
-        mode_scenarios = filter_scenarios(scenarios_for_mode(mode=mode, exhaustive=exhaustive), scenario)
+        mode_scenarios = filter_scenarios(scenarios_for_mode(mode=mode, exhaustive=exhaustive), scenario_names)
 
         mode_total_runs = len(mode_scenarios) * mode_repeats
         CONSOLE.print(f"Running {mode_total_runs} scenarios for mode {mode.value}")
@@ -1452,14 +1460,14 @@ def main(
             )
 
             for repeat_index in range(1, mode_repeats + 1):
-                for scenario in mode_scenarios:
+                for eval_scenario in mode_scenarios:
                     progress.update(
                         task_id,
-                        current_run=f"{scenario.name} (repeat {repeat_index})",
+                        current_run=f"{eval_scenario.name} (repeat {repeat_index})",
                     )
                     results.append(
                         run_scenario_with_retries(
-                            scenario=scenario,
+                            scenario=eval_scenario,
                             mode=mode,
                             repeat_index=repeat_index,
                             max_attempts=scenario_retries,
