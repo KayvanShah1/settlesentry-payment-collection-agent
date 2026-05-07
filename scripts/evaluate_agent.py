@@ -540,6 +540,21 @@ def has_account_not_found_message(records: list[TurnRecord]) -> bool:
     return any(any(re.search(pattern, record.agent_message.lower()) for pattern in patterns) for record in records)
 
 
+def has_amount_exceeds_balance_message(records: list[TurnRecord]) -> bool:
+    patterns = (
+        r"cannot exceed",
+        r"can't exceed",
+        r"must not exceed",
+        r"should not exceed",
+        r"exceeds? (?:the |your )?outstanding balance",
+        r"higher than (?:the |your )?outstanding balance",
+        r"more than (?:the |your )?outstanding balance",
+        r"above (?:the |your )?outstanding balance",
+    )
+
+    return any(any(re.search(pattern, record.agent_message.lower()) for pattern in patterns) for record in records)
+
+
 def assert_account_not_found_recovery(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
@@ -566,7 +581,7 @@ def assert_account_not_found_recovery(
 def assert_amount_exceeds_balance(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
-    has_clear_error = any("cannot exceed" in record.agent_message.lower() for record in records)
+    has_clear_error = has_amount_exceeds_balance_message(records)
 
     ok = (
         not agent.state.completed
@@ -729,7 +744,7 @@ def assert_valid_amount_correction(
 def assert_invalid_amount_correction(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
-    has_clear_error = any("cannot exceed" in record.agent_message.lower() for record in records)
+    has_clear_error = has_amount_exceeds_balance_message(records)
 
     ok = (
         agent.state.payment_amount is None
