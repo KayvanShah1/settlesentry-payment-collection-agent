@@ -17,6 +17,7 @@ from settlesentry.agent.workflow.constants import (
     TERMINAL_PAYMENT_SERVICE_ERRORS,
 )
 from settlesentry.agent.workflow.helpers import (
+    clear_card_details,
     clear_identity_inputs,
     clear_payment_secrets,
     clear_secondary_identity_inputs,
@@ -386,19 +387,18 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
             },
         )
 
-    # Retryable errors clear only impacted fields.
+    # Retryable errors clear the impacted payment context.
     if payment_result.error_code in AMOUNT_RETRY_ERRORS:
         deps.state.payment_amount = None
+        clear_card_details(deps)
 
-    if payment_result.error_code in {PaymentsAPIErrorCode.INVALID_CARD, None}:
-        deps.state.card_number = None
-
-    if payment_result.error_code in {PaymentsAPIErrorCode.INVALID_CVV, None}:
-        deps.state.cvv = None
-
-    if payment_result.error_code == PaymentsAPIErrorCode.INVALID_EXPIRY:
-        deps.state.expiry_month = None
-        deps.state.expiry_year = None
+    elif payment_result.error_code in {
+        PaymentsAPIErrorCode.INVALID_CARD,
+        PaymentsAPIErrorCode.INVALID_CVV,
+        PaymentsAPIErrorCode.INVALID_EXPIRY,
+        None,
+    }:
+        clear_card_details(deps)
 
     attempts_remaining = settings.agent_policy.payment_max_attempts - deps.state.payment_attempts
 

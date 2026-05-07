@@ -79,6 +79,25 @@ def _mentions_verification_exhaustion(message: str) -> bool:
     return has_identity_context and has_exhaustion_context
 
 
+def _mentions_payment_retry_reason(message: str, reason: str | None) -> bool:
+    if not reason:
+        return True
+
+    lowered = message.lower()
+    reason_lowered = reason.lower()
+
+    if "card number" in reason_lowered:
+        return "card" in lowered and ("invalid" in lowered or "appears" in lowered or "could not" in lowered)
+
+    if "cvv" in reason_lowered:
+        return "cvv" in lowered and ("invalid" in lowered or "appears" in lowered or "could not" in lowered)
+
+    if "expiry" in reason_lowered or "expired" in reason_lowered:
+        return "expiry" in lowered and ("invalid" in lowered or "expired" in lowered or "could not" in lowered)
+
+    return True
+
+
 def audit_autonomous_message(deps: AgentDeps, message: str) -> tuple[bool, str]:
     """Audit the LLM-written final message before returning it to the user."""
     message_digits = digits_only(message)
@@ -126,6 +145,25 @@ def audit_autonomous_message(deps: AgentDeps, message: str) -> tuple[bool, str]:
         and not _mentions_verification_exhaustion(message)
     ):
         return False, "verification_exhausted"
+
+    if (
+        deps.state.payment_attempts > 0
+        and not deps.state.completed
+        and deps.state.last_error
+        and not _mentions_payment_retry_reason(message, deps.state.last_error)
+    ):
+        reason = deps.state.last_error.lower()
+
+        if "card number" in reason:
+            return False, "invalid_card"
+
+        if "cvv" in reason:
+            return False, "invalid_cvv"
+
+        if "expiry" in reason or "expired" in reason:
+            return False, "invalid_expiry"
+
+        return False, "payment_failed"
 
     return True, "safe"
 

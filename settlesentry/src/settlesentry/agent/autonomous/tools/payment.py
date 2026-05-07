@@ -44,6 +44,7 @@ Card handling:
 - parse expiry in MM/YYYY into expiry_month and expiry_year
 - never expose full card number or CVV back to the customer
 - never treat card submission as payment confirmation
+- if a payment attempt fails because card details are invalid, all card details are cleared; ask for cardholder name, full card number, expiry in MM/YYYY format, and CVV again
 
 Card tools only collect or validate card details. They must not process payment.
 """.strip()
@@ -68,6 +69,7 @@ Final confirmation handling:
 - process payment only when the customer explicitly confirms with yes or equivalent clear approval
 - decline payment when the customer says no, cancel, stop, or refuses confirmation
 - do not infer confirmation from card details, amount entry, silence, or ambiguous replies
+- if payment processing returns invalid_card, invalid_cvv, or invalid_expiry, do not ask only for the failed field; ask for complete card details again because the card detail bundle has been cleared
 
 Only claim payment success if the tool returns payment_success or conversation_closed with transaction_id.
 If processing fails or attempts are exhausted, do not retry automatically unless the tool explicitly keeps the flow open.
@@ -221,3 +223,34 @@ def decline_payment(ctx: RunContext[AgentDeps]) -> object:
         ok=True,
         status="cancelled",
     )
+
+
+@final_confirmation_toolset.tool(
+    name="correct_payment_amount",
+    **tool_options(
+        description=(
+            "Correct the payment amount after payment details have been collected "
+            "and re-stage the payment for confirmation."
+        ),
+        category="payment_amount",
+        sensitivity="medium",
+        mutates_state=True,
+    ),
+)
+@log_tool_call(tool_name="correct_payment_amount", category="payment_amount")
+def correct_payment_amount(
+    ctx: RunContext[AgentDeps],
+    amount: Decimal,
+) -> object:
+    amount_result = capture_payment_amount(
+        ctx.deps,
+        ExtractedUserInput(payment_amount=amount),
+    )
+
+    if not amount_result.ok:
+        return amount_result
+
+    if amount_result.recommended_tool == "prepare_payment":
+        return prepare_payment(ctx.deps)
+
+    return amount_result

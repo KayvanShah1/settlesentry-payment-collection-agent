@@ -81,6 +81,7 @@ Status behavior:
 - card_details_captured: if confirmation is required, summarize the payment amount and card last 4 if available, then ask the customer to reply yes to confirm or no to cancel.
 - payment_ready_for_confirmation: summarize amount and card last 4, then ask for yes/no confirmation.
 - payment_not_confirmed: say payment has not been confirmed and ask the customer to reply yes to confirm or no to cancel.
+- invalid_card, invalid_cvv, or invalid_expiry: say the card details could not be validated, then ask for cardholder name, full card number, expiry in MM/YYYY format, and CVV again.
 - payment_success or conversation_closed with transaction_id: say payment was processed successfully, include the transaction ID, and state that the conversation is closed.
 - cancelled: say the payment flow was cancelled, no payment was processed, and the conversation is closed.
 - network_error, timeout, invalid_response, unexpected_status, payment_failed, or payment_attempts_exhausted: say payment was not completed due to a payment service issue, no payment was processed, and the conversation is closed.

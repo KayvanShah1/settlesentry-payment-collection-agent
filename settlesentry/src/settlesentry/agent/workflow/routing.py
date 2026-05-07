@@ -34,6 +34,7 @@ def expected_fields(deps: AgentDeps) -> tuple[ExpectedField, ...]:
                     ("cardholder_name", not deps.state.cardholder_name),
                     ("card_number", not deps.state.card_number),
                     ("expiry", not deps.state.expiry_month or not deps.state.expiry_year),
+                    ("cvv", not deps.state.cvv),
                 )
                 if missing
             )
@@ -88,6 +89,7 @@ def required_fields(deps: AgentDeps) -> tuple[str, ...]:
                 ("cardholder_name", not state.cardholder_name),
                 ("card_number", not state.card_number),
                 ("expiry", not state.expiry_month or not state.expiry_year),
+                ("cvv", not state.cvv),
             )
             if missing
         )

@@ -13,6 +13,7 @@ from settlesentry.agent.autonomous.tools.lifecycle import (
 )
 from settlesentry.agent.autonomous.tools.payment import (
     confirm_and_process_payment,
+    correct_payment_amount,
     decline_payment,
     prepare_payment_for_confirmation,
     provide_card_details,
@@ -37,6 +38,13 @@ class FakePaymentsClient:
     def __init__(self) -> None:
         self.lookup_calls: list[str] = []
         self.payment_calls: list[object] = []
+        self.payment_outcomes: list[PaymentResult] = [
+            PaymentResult(
+                ok=True,
+                transaction_id="txn_test_123",
+                status_code=200,
+            )
+        ]
 
         self.accounts = {
             "ACC1001": AccountDetails(
@@ -78,11 +86,19 @@ class FakePaymentsClient:
     def process_payment(self, payment_request) -> PaymentResult:
         self.payment_calls.append(payment_request)
 
-        return PaymentResult(
-            ok=True,
-            transaction_id="txn_test_123",
-            status_code=200,
-        )
+        if len(self.payment_calls) <= len(self.payment_outcomes):
+            return self.payment_outcomes[len(self.payment_calls) - 1]
+
+        return self.payment_outcomes[-1]
+
+
+def invalid_card_result() -> PaymentResult:
+    return PaymentResult(
+        ok=False,
+        error_code=PaymentsAPIErrorCode.INVALID_CARD,
+        message="The card number appears to be invalid.",
+        status_code=422,
+    )
 
 
 @pytest.fixture
@@ -380,6 +396,32 @@ def test_confirm_and_process_payment_success_closes_and_clears_secrets(
     assert len(payments_client.payment_calls) == 1
 
 
+def test_payment_invalid_card_clears_all_card_details_and_requests_full_card_bundle(
+    deps: AgentDeps,
+    payments_client: FakePaymentsClient,
+):
+    payments_client.payment_outcomes = [invalid_card_result()]
+    prepare_valid_payment(deps)
+
+    result = confirm_and_process_payment(ctx(deps))
+
+    assert result.ok is False
+    assert result.status == "invalid_card"
+    assert result.required_fields == (
+        "cardholder_name",
+        "card_number",
+        "expiry",
+        "cvv",
+    )
+    assert deps.state.cardholder_name is None
+    assert deps.state.card_number is None
+    assert deps.state.expiry_month is None
+    assert deps.state.expiry_year is None
+    assert deps.state.cvv is None
+    assert deps.state.payment_confirmed is False
+    assert deps.state.step == ConversationStep.WAITING_FOR_CARDHOLDER_NAME
+
+
 def test_decline_payment_closes_without_processing(
     deps: AgentDeps,
     payments_client: FakePaymentsClient,
@@ -453,3 +495,30 @@ def test_provide_account_id_retries_valid_account_after_not_found(
     assert deps.state.account_id == "ACC1001"
     assert deps.state.has_account_loaded() is True
     assert payments_client.lookup_calls == ["ACC6986", "ACC1001"]
+
+
+def test_correct_payment_amount_reprepares_confirmation(deps: AgentDeps):
+    prepare_valid_payment(deps)
+
+    result = correct_payment_amount(ctx(deps), amount=Decimal("600.00"))
+
+    assert result.ok is True
+    assert result.status == "payment_ready_for_confirmation"
+    assert result.required_fields == ("confirmation",)
+    assert result.facts["amount"] == "600.00"
+    assert deps.state.payment_amount == Decimal("600.00")
+    assert deps.state.payment_confirmed is False
+    assert deps.state.step == ConversationStep.WAITING_FOR_PAYMENT_CONFIRMATION
+
+
+def test_correct_payment_amount_blocks_amount_exceeding_balance(deps: AgentDeps):
+    prepare_valid_payment(deps)
+
+    result = correct_payment_amount(ctx(deps), amount=Decimal("2000.00"))
+
+    assert result.ok is False
+    assert result.status == "amount_exceeds_balance"
+    assert result.required_fields == ("payment_amount",)
+    assert deps.state.payment_amount is None
+    assert deps.state.payment_confirmed is False
+    assert deps.state.step == ConversationStep.WAITING_FOR_PAYMENT_AMOUNT

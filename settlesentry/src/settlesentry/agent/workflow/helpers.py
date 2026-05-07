@@ -150,3 +150,12 @@ def clear_account_context(deps: AgentDeps) -> None:
     deps.state.provided_pincode = None
     clear_payment_context(deps)
     deps.state.last_error = None
+
+
+def clear_card_details(deps: AgentDeps) -> None:
+    deps.state.cardholder_name = None
+    deps.state.card_number = None
+    deps.state.cvv = None
+    deps.state.expiry_month = None
+    deps.state.expiry_year = None
+    deps.state.payment_confirmed = False

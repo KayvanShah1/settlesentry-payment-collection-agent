@@ -352,8 +352,8 @@ def test_process_payment_is_blocked_without_confirmation():
     assert deps.state.transaction_id is None
 
 
-# Payment failure tests ensure retryable API errors clear only affected fields
-# and terminal errors close safely.
+# Payment failure tests ensure retryable API errors clear payment context for
+# safe retries and terminal errors close safely.
 def test_failed_payment_can_retry_missing_card_fields():
     deps = make_deps(FailingPaymentsClient())
 
@@ -363,8 +363,13 @@ def test_failed_payment_can_retry_missing_card_fields():
 
     assert result.ok is False
     assert result.status == "invalid_card"
-    assert result.required_fields == ("card_number",)
+    assert result.required_fields == ("cardholder_name",)
+    assert deps.state.cardholder_name is None
     assert deps.state.card_number is None
+    assert deps.state.expiry_month is None
+    assert deps.state.expiry_year is None
+    assert deps.state.cvv is None
+    assert deps.state.payment_confirmed is False
     assert deps.state.completed is False
 
 

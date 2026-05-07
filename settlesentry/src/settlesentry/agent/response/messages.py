@@ -81,7 +81,7 @@ def pending_question(context: ResponseContext) -> str:
     if not fields:
         return "Please provide the requested detail to continue."
 
-    card_group = [field for field in fields if field in {"cardholder_name", "card_number", "expiry"}]
+    card_group = [field for field in fields if field in {"cardholder_name", "card_number", "expiry", "cvv"}]
 
     if len(card_group) > 1:
         labels = [FIELD_LABELS[field] for field in card_group]
@@ -256,9 +256,18 @@ STATIC_MESSAGES: dict[str, str] = {
         f"in this chat. {NO_PAYMENT_PROCESSED} {TRY_AGAIN_LATER}"
     ),
     "zero_balance": "Identity verified. There is no outstanding balance to pay on this account, so the payment flow is now closed.",
-    "invalid_card": "The card number appears to be invalid. Please share the full card number again.",
-    "invalid_cvv": "The CVV appears to be invalid. Please share the CVV again.",
-    "invalid_expiry": "The card expiry appears to be invalid or expired. Please share the expiry in MM/YYYY format again.",
+    "invalid_card": (
+        "The card details could not be validated. Please share the cardholder name, full card number, "
+        "expiry in MM/YYYY format, and CVV again."
+    ),
+    "invalid_cvv": (
+        "The card details could not be validated. Please share the cardholder name, full card number, "
+        "expiry in MM/YYYY format, and CVV again."
+    ),
+    "invalid_expiry": (
+        "The card details could not be validated. Please share the cardholder name, full card number, "
+        "expiry in MM/YYYY format, and CVV again."
+    ),
     "network_error": PAYMENT_UNAVAILABLE_MESSAGE,
     "timeout": PAYMENT_UNAVAILABLE_MESSAGE,
     "invalid_response": PAYMENT_SERVICE_FAILURE_MESSAGE,
