@@ -537,10 +537,7 @@ def has_account_not_found_message(records: list[TurnRecord]) -> bool:
         r"unable to locate",
     )
 
-    return any(
-        any(re.search(pattern, record.agent_message.lower()) for pattern in patterns)
-        for record in records
-    )
+    return any(any(re.search(pattern, record.agent_message.lower()) for pattern in patterns) for record in records)
 
 
 def assert_account_not_found_recovery(
@@ -754,22 +751,28 @@ def assert_invalid_amount_correction(
 def assert_payment_failure_recovery(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
-    has_invalid_card_message = any(
-        "card number appears to be invalid" in record.agent_message.lower() for record in records
+    has_card_details_retry_message = any(
+        "card details" in record.agent_message.lower()
+        or (
+            "cardholder name" in record.agent_message.lower()
+            and "card number" in record.agent_message.lower()
+            and "cvv" in record.agent_message.lower()
+        )
+        for record in records
     )
 
     ok = (
         agent.state.completed
         and agent.state.transaction_id == "txn_eval_success"
         and len(client.payment_calls) == 2
-        and has_invalid_card_message
+        and has_card_details_retry_message
     )
 
     return assertion_result(
         ok,
         "payment failure recovery failed",
         payment_recovery_success=int(ok),
-        clear_error_message=int(has_invalid_card_message),
+        clear_error_message=int(has_card_details_retry_message),
         payment_calls=len(client.payment_calls),
     )
 
@@ -907,7 +910,15 @@ SCENARIOS = [
     EvalScenario(
         "payment_failure_recovery",
         "recovery",
-        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes", "4532 0151 1283 0366", "yes"],
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES
+        + [
+            "yes",
+            "Nithin Jain",
+            "4532 0151 1283 0366",
+            "12/2027",
+            "123",
+            "yes",
+        ],
         assert_payment_failure_recovery,
         payment_outcomes=[
             invalid_card_result(),
@@ -917,7 +928,20 @@ SCENARIOS = [
     EvalScenario(
         "payment_attempts_exhausted_closes",
         "failure_close",
-        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes", "4532 0151 1283 0366", "yes", "4532 0151 1283 0366", "yes"],
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES
+        + [
+            "yes",
+            "Nithin Jain",
+            "4532 0151 1283 0366",
+            "12/2027",
+            "123",
+            "yes",
+            "Nithin Jain",
+            "4532 0151 1283 0366",
+            "12/2027",
+            "123",
+            "yes",
+        ],
         assert_payment_attempts_exhausted,
         payment_outcomes=[
             invalid_card_result(),
@@ -975,6 +999,28 @@ def scenarios_for_mode(
         return [scenario for scenario in SCENARIOS if scenario.name in LLM_AUTONOMOUS_AGENT_SCENARIOS]
 
     raise ValueError(f"Unsupported eval mode: {mode}")
+
+
+def filter_scenarios(
+    scenarios: list[EvalScenario],
+    selected_names: list[str] | None,
+) -> list[EvalScenario]:
+    if not selected_names:
+        return scenarios
+
+    selected = set(selected_names)
+    available = {scenario.name for scenario in scenarios}
+    unknown = selected - available
+
+    if unknown:
+        raise SystemExit(
+            "Unknown scenario(s): "
+            + ", ".join(sorted(unknown))
+            + "\nAvailable scenarios: "
+            + ", ".join(sorted(available))
+        )
+
+    return [scenario for scenario in scenarios if scenario.name in selected]
 
 
 def resolve_modes(run_all: bool, requested_mode: str) -> list[AgentMode]:
@@ -1355,6 +1401,13 @@ def main(
         min=1,
         help="Repeats for llm and full-llm modes.",
     ),
+    scenario: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--scenario",
+            help="Run only the named scenario. Can be passed multiple times.",
+        ),
+    ] = None,
     scenario_retries: int = typer.Option(
         EVALUATOR_CONFIG.scenario_retries_default,
         "--scenario-retries",
@@ -1376,10 +1429,7 @@ def main(
             llm_repeats if mode in {AgentMode.LLM_PARSER_WORKFLOW, AgentMode.LLM_PARSER_RESPONDER_WORKFLOW} else repeats
         )
 
-        mode_scenarios = scenarios_for_mode(
-            mode=mode,
-            exhaustive=exhaustive,
-        )
+        mode_scenarios = filter_scenarios(scenarios_for_mode(mode=mode, exhaustive=exhaustive), scenario)
 
         mode_total_runs = len(mode_scenarios) * mode_repeats
         CONSOLE.print(f"Running {mode_total_runs} scenarios for mode {mode.value}")
