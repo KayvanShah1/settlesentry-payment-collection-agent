@@ -23,7 +23,7 @@ def test_context_formatter_appends_extra_fields():
 
     assert "lookup_account_started" in rendered
     assert "operation_id=op_abc123" in rendered
-    assert "account_id=ACC1001" in rendered
+    assert f"account_id={MASK}" in rendered
     assert "tool_name=lookup_account" in rendered
 
 

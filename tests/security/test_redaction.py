@@ -1,7 +1,6 @@
 import logging
 
 import pytest
-
 from settlesentry.core.logger import SensitiveDataFilter
 from settlesentry.security.cards import luhn_valid
 from settlesentry.security.redaction import MASK, is_sensitive_key, redact_sensitive_text, redact_sensitive_value
@@ -22,7 +21,7 @@ def test_sensitive_key_detection_normalizes_common_variants():
     assert is_sensitive_key("cvv") is True
     assert is_sensitive_key("aadhaar_last4") is True
     assert is_sensitive_key("pin_code") is True
-    assert is_sensitive_key("account_id") is False
+    assert is_sensitive_key("account_id") is True
     assert is_sensitive_key("amount") is False
 
 
@@ -71,7 +70,7 @@ def test_nested_payload_sensitive_keys_are_fully_masked():
     }
 
     assert redact_sensitive_value(payload) == {
-        "account_id": "ACC1001",
+        "account_id": MASK,
         "amount": 500.00,
         "card_number": MASK,
         "cvv": MASK,
@@ -85,7 +84,7 @@ def test_nested_payload_sensitive_keys_are_fully_masked():
 
 def test_redact_sensitive_value_preserves_safe_strings():
     payload = {
-        "account_id": "ACC1001",
+        "account_id": MASK,
         "message": "safe operational message",
         "status_code": 200,
         "amount": 500.00,
@@ -109,7 +108,7 @@ def test_redact_sensitive_value_handles_lists_and_tuples():
     redacted = redact_sensitive_value(payload)
 
     assert redacted["events"][0]["cvv"] == MASK
-    assert redacted["events"][1]["account_id"] == "ACC1001"
+    assert redacted["events"][1]["account_id"] == MASK
     assert redacted["cards"][0]["card_number"] == MASK
     assert redacted["cards"][1]["amount"] == 500.00
 
@@ -177,6 +176,6 @@ def test_logging_filter_preserves_safe_extra_fields():
 
     SensitiveDataFilter().filter(record)
 
-    assert record.account_id == "ACC1001"
+    assert record.account_id == MASK
     assert record.amount == 500.00
     assert record.status_code == 200
