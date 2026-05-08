@@ -1,10 +1,7 @@
 services:
   settlesentry:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: settlesentry:latest
-    container_name: settlesentry-agent
+    image: ghcr.io/kayvanshah1/settlesentry-payment-collection-agent:latest
+    pull_policy: missing
     stdin_open: true
     tty: true
     env_file:
@@ -17,11 +14,8 @@ services:
     command: ["chat", "--mode", "deterministic-workflow"]
 
   settlesentry-autonomous:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: settlesentry:latest
-    container_name: settlesentry-autonomous-agent
+    image: ghcr.io/kayvanshah1/settlesentry-payment-collection-agent:latest
+    pull_policy: missing
     stdin_open: true
     tty: true
     env_file:

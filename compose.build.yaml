@@ -1,0 +1,14 @@
+services:
+  settlesentry:
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: settlesentry:local
+
+  settlesentry-autonomous:
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: settlesentry:local
