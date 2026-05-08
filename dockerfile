@@ -18,7 +18,7 @@ COPY settlesentry/src ./settlesentry/src
 
 # Install runtime dependencies and the installable package.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable --package settlesentry
+    uv sync --no-dev --no-editable --package settlesentry
 
 
 FROM python:3.12-slim-trixie AS runtime
