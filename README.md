@@ -11,11 +11,13 @@
 
 **SettleSentry** is a conversational payment collection agent for services where customers may have an outstanding amount due, such as cloud bills, mobile plans, subscriptions, or other recurring service balances. It verifies the customer first, shows the amount due only after verification, and guides payment collection through a controlled, policy-governed workflow.
 
-The core design principle is separation of language understanding from payment authority:
+> SettleSentry guides payment collection to closure in **under 9 user turns on average**, with **1 min 14 sec automated completion time** with full policy compliance, **0 PII leaks** and no premature payment calls.
 
-- LLM usage is optional and limited to parsing and response phrasing.
-- LangGraph controls workflow progression.
-- Deterministic policy gates control verification, balance disclosure, confirmation, and payment execution.
+The core design principle is separation of conversation intelligence from payment authority:
+
+- Deterministic workflow and policy gates control verification, balance disclosure, payment confirmation, and payment execution.
+- LLMs can be used progressively: for parsing, response phrasing, or autonomous tool orchestration.
+- Even in autonomous mode, the LLM does not own payment authority; it can only call phase-scoped tools backed by deterministic operations and policy checks.
 
 ![SettleSentry payment workflow illustration](docs/img/stock_image.jpg)
 
@@ -32,7 +34,11 @@ SettleSentry demonstrates how this workflow can be automated without giving unco
 - Policy-gated amount validation, card collection, and payment execution
 - Explicit confirmation before any payment API call
 - Recovery flows for verification, amount, card, API, cancellation, and terminal failure cases
-- Optional LLM parser and optional LLM responder with deterministic fallback
+- Progressive LLM integration: parser, responder, and autonomous tool-calling modes with deterministic fallback boundaries
+- Four-mode ablation design: deterministic workflow, LLM parser, LLM parser/responder, and LLM autonomous tool orchestration
+- LLM-led autonomous mode over phase-scoped account, identity, amount, card, confirmation, lifecycle, and safety tools
+- Safety audit and deterministic fallback for autonomous LLM responses
+- Scenario filtering and exhaustive all-mode evaluation support
 - Scenario evaluator covering success, recovery, guardrail, correction, and closure paths
 - Evaluation-compatible interface
 
@@ -41,26 +47,32 @@ SettleSentry demonstrates how this workflow can be automated without giving unco
 ```mermaid
 flowchart TD
     U[User Message] --> I[Agent Interface]
-    I --> G[LangGraph Workflow]
-    G --> P[Parser Layer]
+    I --> G[LangGraph Orchestration]
+    G --> P[Input Understanding / Tool Layer]
     P --> S[Conversation State]
     S --> R{Routing + Policy Gates}
 
+    R -->|Needs More Information| Q[Ask Next Required Field]
     R -->|Account Lookup Allowed| L[Lookup Account API]
     R -->|Verification Ready| V[In-Agent Identity Verification]
-    R -->|Payment Details Ready| C[Prepare Payment Confirmation]
-    C --> K[Explicit User Confirmation]
-    K --> X[Process Payment API]
+    R -->|Amount and Card Details Ready| C[Prepare Payment Confirmation]
+    C --> K{Explicit User Confirmation?}
+    K -->|Yes + Policy Allowed| X[Process Payment API]
+    K -->|No / Cancel| Z[Close Safely]
+    R -->|Terminal or Unsafe to Continue| Z
 
-    L --> M[Response Context]
+    Q --> M[Safe Response Context]
+    L --> M
     V --> M
     C --> M
     X --> M
-    M --> W[Responder]
+    Z --> M
+
+    M --> W[Agent Response / Safety Fallback]
     W --> A[User-Facing Message]
 ```
 
-Each user message is processed as one controlled workflow turn. The session preserves structured workflow state and recent conversation context so the agent can handle short replies, corrections, retries, and out-of-order information without losing control of payment-critical decisions.
+Each user message is processed as one controlled workflow turn. The agent preserves structured state and recent context for short replies, corrections, retries, and out-of-order inputs, while deterministic policy gates control account lookup, verification, balance disclosure, confirmation, and payment execution across all modes.
 
 For the full architecture, policy model, assumptions, and tradeoffs, see the [Design Document](docs/DESIGN.md).
 
@@ -79,24 +91,25 @@ For detailed safety rules and workflow decisions, see [Design Document](docs/DES
 
 ## Modes
 
-The CLI supports three modes:
+The CLI supports four modes:
 
-| Mode       | Input Understanding                 | Response Writing                       | Use Case                                                               |
-| ---------- | ----------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
-| `local`    | Deterministic parser                | Deterministic responses                | Stable baseline with no external LLM dependency                        |
-| `llm`      | LLM parser + deterministic fallback | Deterministic responses                | Natural-language extraction with fixed response wording                |
-| `full-llm` | LLM parser + deterministic fallback | LLM responder + deterministic fallback | Natural-language extraction and response phrasing with safety fallback |
+| Mode | Input Understanding | Response Writing | Tool / Workflow Control | Use Case |
+|---|---|---|---|---|
+| `deterministic-workflow` | Deterministic parser | Deterministic responses | LangGraph workflow routing | Stable no-LLM baseline |
+| `llm-parser-workflow` | LLM parser with deterministic fallback | Deterministic responses | LangGraph workflow routing | Flexible extraction with fixed response behavior |
+| `llm-parser-responder-workflow` | LLM parser with deterministic fallback | LLM responder with deterministic fallback | LangGraph workflow routing | Natural extraction and response phrasing |
+| `llm-autonomous-agent` | LLM interprets the turn | LLM-written response with safety audit/fallback | LLM tool selection over phase-scoped tools | Autonomous agent ablation mode |
 
-The default CLI mode is `llm`. Use `local` when no OpenRouter API key is configured.
+The default CLI mode is `llm-parser-workflow`. Use `deterministic-workflow` when no OpenRouter API key is configured.
 
-In all modes, payment authority remains deterministic and policy-controlled. The LLM does not verify identity, authorize payment, decide balance disclosure, or call payment APIs directly.
+In every mode, payment authority remains deterministic and policy-controlled. The LLM does not verify identity, authorize balance disclosure, bypass policy gates, or process payment without explicit confirmation.
 
 ## Tech Stack
 
 * Python 3.12
 * LangGraph for workflow orchestration
 * Pydantic and Pydantic Settings for schema/configuration validation
-* PydanticAI with OpenRouter for optional LLM parser/responder behavior
+* PydanticAI with OpenRouter for optional LLM parser, responder, and autonomous tool-orchestration behavior
 * HTTPX and Tenacity for API communication and retry handling
 * Typer and Rich for interactive CLI
 * Pytest for unit and workflow test coverage
@@ -112,7 +125,7 @@ uv sync --all-packages
 
 ## Configuration
 
-LLM configuration is optional and required only for `llm` and `full-llm` modes.
+LLM configuration is optional and required for `llm-parser-workflow`, `llm-parser-responder-workflow`, and `llm-autonomous-agent`.
 
 ```bash
 # Optional, required only for LLM modes
@@ -141,23 +154,26 @@ AGENT_POLICY_ALLOW_ZERO_BALANCE_PAYMENT=false
 ## Run the Agent
 
 ```bash
-# Local deterministic mode
-uv run settlesentry chat --mode local
+# Deterministic workflow
+uv run settlesentry chat --mode deterministic-workflow
 
 # LLM parser with deterministic responses
-uv run settlesentry chat --mode llm
+uv run settlesentry chat --mode llm-parser-workflow
 
 # LLM parser and LLM-written responses
-uv run settlesentry chat --mode full-llm
+uv run settlesentry chat --mode llm-parser-responder-workflow
+
+# LLM autonomous tool-calling agent
+uv run settlesentry chat --mode llm-autonomous-agent
 
 # Show privacy-safe state after each turn
-uv run settlesentry chat --mode local --show-state
+uv run settlesentry chat --mode llm-autonomous-agent --show-state
 
 # Enable console debug logs
-uv run settlesentry chat --mode local --debug-logs
+uv run settlesentry chat --mode llm-autonomous-agent --debug-logs
 ```
 
-If no OpenRouter API key is configured, use `local` mode.
+If no OpenRouter API key is configured, use `deterministic-workflow` mode.
 
 ## Run Tests and Evaluation
 
@@ -167,23 +183,30 @@ Run the core test suite:
 uv run pytest -q
 ```
 
-Run the deterministic scenario evaluator:
+Run mode-specific evaluation:
 
 ```bash
-uv run python scripts/evaluate_agent.py --no-all --mode local
+# Deterministic baseline: no LLM dependencies.
+uv run python scripts/evaluate_agent.py --no-all --mode deterministic-workflow
+
+# Hybrid mode: LLM parser with deterministic response generation.
+uv run python scripts/evaluate_agent.py --no-all --mode llm-parser-workflow
+
+# Hybrid mode: LLM parser and LLM responder (deterministic fallback remains available).
+uv run python scripts/evaluate_agent.py --no-all --mode llm-parser-responder-workflow
+
+# Autonomous mode: LLM-led, phase-scoped tool orchestration with safety/fallback controls.
+uv run python scripts/evaluate_agent.py --no-all --mode llm-autonomous-agent
+
+# Full exhaustive run: execute the complete scenario matrix across all configured modes.
+uv run python scripts/evaluate_agent.py --all --exhaustive
+
 ```
 
-Run LLM-assisted evaluation when credentials are configured:
+Run a targeted autonomous scenario:
 
 ```bash
-uv run python scripts/evaluate_agent.py --no-all --mode llm
-uv run python scripts/evaluate_agent.py --no-all --mode full-llm
-```
-
-Use `--exhaustive` when you want the selected LLM mode to run the full scenario matrix. Without `--exhaustive`, LLM modes run a smaller subset to control runtime and provider cost.
-
-```bash
-uv run python scripts/evaluate_agent.py --no-all --mode full-llm --exhaustive
+uv run python scripts/evaluate_agent.py --mode llm-autonomous-agent --no-all --exhaustive --scenario verification_exhaustion_closes
 ```
 
 For evaluation methodology, metrics, and acceptance criteria, see [Evaluation Approach](docs/EVALUATION.md).
@@ -238,6 +261,8 @@ Full happy-path, failure, retry, side-question, correction, and closure examples
 * [Design Document](docs/DESIGN.md)
 * [Evaluation Approach](docs/EVALUATION.md)
 * [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md)
+* [Autonomous Agent Mode](docs/AUTONOMOUS_MODE.md)
+* [Engineering Issue Log](docs/DEVELOPMENT_ISSUES.md)
 * [Assignment Instructions](docs/instructions/ASSIGNMENT.md)
 * [Package Layout](settlesentry/README.md)
 

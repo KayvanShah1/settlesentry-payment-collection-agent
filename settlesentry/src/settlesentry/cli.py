@@ -1,26 +1,43 @@
 from __future__ import annotations
 
 import os
-from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, TypeAlias
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from settlesentry.agent.modes import LLM_REQUIRED_MODES, AgentMode, mode_profile
+
 app = typer.Typer(
     help="SettleSentry payment collection agent CLI.",
     no_args_is_help=False,
-    invoke_without_command=True,
 )
 
 console = Console()
 
+DEFAULT_MODE = AgentMode.LLM_AUTONOMOUS_AGENT
 
-class AgentMode(StrEnum):
-    LOCAL = "local"
-    LLM = "llm"
-    FULL_LLM = "full-llm"
+ModeOption: TypeAlias = Annotated[
+    AgentMode,
+    typer.Option(
+        "--mode",
+        "-m",
+        help=(
+            "Agent mode: deterministic-workflow, llm-parser-workflow, "
+            "llm-parser-responder-workflow, or llm-autonomous-agent."
+        ),
+    ),
+]
+
+ShowStateOption: TypeAlias = Annotated[
+    bool, typer.Option("--show-state", help="Print privacy-safe state after each turn.")
+]
+
+DebugLogsOption: TypeAlias = Annotated[
+    bool, typer.Option("--debug-logs", help="Show internal application logs in the console.")
+]
+
 
 def configure_console_logging(debug_logs: bool) -> None:
     """Configure console logging before importing settings-bound modules."""
@@ -38,30 +55,44 @@ def build_agent(mode: AgentMode):
     from settlesentry.agent.response.writer import build_response_writer
     from settlesentry.core import settings
 
-    if mode == AgentMode.LOCAL:
+    profile = mode_profile(mode)
+
+    if mode in LLM_REQUIRED_MODES and not settings.llm.api_key:
+        raise RuntimeError(
+            f"OPENROUTER_API_KEY is missing. Cannot run mode={mode.value}. "
+            "Set OPENROUTER_API_KEY in your environment/.env file."
+        )
+
+    if mode == AgentMode.DETERMINISTIC_WORKFLOW:
         return Agent(
             parser=DeterministicInputParser(),
             responder=build_fallback_response,
-            grouped_card_collection=False,
+            grouped_card_collection=profile.grouped_card_collection,
         )
 
-    if not settings.llm.api_key:
-        raise RuntimeError(
-            "OPENROUTER_API_KEY is missing. Use --mode local or set OPENROUTER_API_KEY in your environment/.env file."
-        )
-
-    if mode == AgentMode.LLM:
+    if mode == AgentMode.LLM_PARSER_WORKFLOW:
         return Agent(
             parser=build_input_parser(),
             responder=build_fallback_response,
-            grouped_card_collection=True,
+            grouped_card_collection=profile.grouped_card_collection,
         )
 
-    return Agent(
-        parser=build_input_parser(),
-        responder=build_response_writer(),
-        grouped_card_collection=True,
-    )
+    if mode == AgentMode.LLM_PARSER_RESPONDER_WORKFLOW:
+        return Agent(
+            parser=build_input_parser(),
+            responder=build_response_writer(),
+            grouped_card_collection=profile.grouped_card_collection,
+        )
+
+    if mode == AgentMode.LLM_AUTONOMOUS_AGENT:
+        from settlesentry.agent.autonomous.graph import build_autonomous_graph
+
+        return Agent(
+            grouped_card_collection=profile.grouped_card_collection,
+            graph=build_autonomous_graph(),
+        )
+
+    raise ValueError(f"Unsupported agent mode: {mode}")
 
 
 def validate_agent_response(response: dict) -> str:
@@ -81,17 +112,12 @@ def validate_agent_response(response: dict) -> str:
 
 
 def print_header(mode: AgentMode, debug_logs: bool) -> None:
-    descriptions = {
-        AgentMode.LOCAL: "Local mode: deterministic parser and deterministic responses.",
-        AgentMode.LLM: "LLM mode: LLM parser with deterministic responses.",
-        AgentMode.FULL_LLM: "Full LLM mode: LLM parser and LLM-written responses.",
-    }
-
+    profile = mode_profile(mode)
     logging_text = "console logs enabled" if debug_logs else "console logs disabled"
 
     console.print(
         Panel.fit(
-            f"[bold]SettleSentry Payment Collection Agent[/bold]\n{descriptions[mode]}\n[dim]{logging_text}[/dim]",
+            f"[bold]SettleSentry Payment Collection Agent[/bold]\n{profile.description}\n[dim]{logging_text}[/dim]",
             border_style="blue",
         )
     )
@@ -186,28 +212,9 @@ def run_chat(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    mode: Annotated[
-        AgentMode,
-        typer.Option(
-            "--mode",
-            "-m",
-            help="Agent mode: local, llm, or full-llm.",
-        ),
-    ] = AgentMode.LLM,
-    show_state: Annotated[
-        bool,
-        typer.Option(
-            "--show-state",
-            help="Print privacy-safe state after each turn.",
-        ),
-    ] = False,
-    debug_logs: Annotated[
-        bool,
-        typer.Option(
-            "--debug-logs",
-            help="Show internal application logs in the console.",
-        ),
-    ] = False,
+    mode: ModeOption = DEFAULT_MODE,
+    show_state: ShowStateOption = False,
+    debug_logs: DebugLogsOption = False,
 ) -> None:
     """Run interactive chat when no subcommand is provided."""
     if ctx.invoked_subcommand is None:
@@ -220,28 +227,9 @@ def main(
 
 @app.command()
 def chat(
-    mode: Annotated[
-        AgentMode,
-        typer.Option(
-            "--mode",
-            "-m",
-            help="Agent mode: local, llm, or full-llm.",
-        ),
-    ] = AgentMode.LLM,
-    show_state: Annotated[
-        bool,
-        typer.Option(
-            "--show-state",
-            help="Print privacy-safe state after each turn.",
-        ),
-    ] = False,
-    debug_logs: Annotated[
-        bool,
-        typer.Option(
-            "--debug-logs",
-            help="Show internal application logs in the console.",
-        ),
-    ] = False,
+    mode: ModeOption = DEFAULT_MODE,
+    show_state: ShowStateOption = False,
+    debug_logs: DebugLogsOption = False,
 ) -> None:
     """
     Run the payment collection agent interactively.

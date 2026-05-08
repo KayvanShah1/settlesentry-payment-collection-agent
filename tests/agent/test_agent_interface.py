@@ -95,7 +95,7 @@ def test_agent_treats_account_id_as_opaque_and_uses_lookup_result():
 
     message = response["message"].lower()
 
-    assert agent.state.account_id == "AC1001"
+    assert agent.state.account_id is None
     assert agent.state.has_account_loaded() is False
     assert agent.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID
     assert "account" in message
@@ -111,7 +111,7 @@ def test_agent_reprompts_when_account_not_found():
 
     message = response["message"].lower()
 
-    assert agent.state.account_id == "UNKNOWN123"
+    assert agent.state.account_id is None
     assert agent.state.has_account_loaded() is False
     assert agent.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID
     assert "account" in message

@@ -2,7 +2,9 @@
 
 These examples show representative SettleSentry behavior across successful payment, verification failure, payment guardrails, recovery, correction, cancellation, and closure paths.
 
-Exact wording may vary slightly across `local`, `llm`, and `full-llm` modes because LLM-assisted modes can phrase responses differently. In LLM modes, the agent may also group payment-detail questions when enough context is available.
+Exact wording may vary slightly across `deterministic-workflow`, `llm-parser-workflow`, `llm-parser-responder-workflow`, and `llm-autonomous-agent`. LLM-assisted modes may phrase responses differently, and autonomous mode may group or sequence tool-driven prompts differently while preserving the same safety behavior.
+
+In `llm-autonomous-agent`, the LLM chooses among phase-scoped tools, but deterministic policy gates still control lookup, verification, balance disclosure, confirmation, payment processing, and closure.
 
 Safety behavior remains consistent across modes:
 
@@ -12,7 +14,8 @@ Safety behavior remains consistent across modes:
 - full card number and CVV are not repeated in responses
 - closed conversations do not continue payment collection
 
-All values shown below are assignment/test values only.
+> [!Note]
+> All values shown below are assignment/test values only.
 
 ## 1. Successful Payment
 
@@ -127,7 +130,7 @@ USER: Wrong Name Three
 AGENT: Please share one verification factor: DOB in YYYY-MM-DD format, Aadhaar last 4 digits, or pincode.
 
 USER: 1990-05-14
-AGENT: I'm unable to verify your identity after multiple attempts, so I can't continue with payment collection in this chat. No payment has been processed. Please try again later or contact support if you need help.
+AGENT: I could not verify your identity after multiple attempts. No payment has been processed. This conversation is now closed.
 ```
 
 ## 6. Zero-Balance Account
@@ -223,9 +226,18 @@ This example starts after payment preparation.
 AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
 
 USER: yes
-AGENT: The card number appears to be invalid. Please share the full card number again.
+AGENT: The card details could not be validated. Please share the cardholder name, full card number, expiry in MM/YYYY format, and CVV again.
+
+USER: Nithin Jain
+AGENT: Please share the full card number, expiry in MM/YYYY format, and CVV.
 
 USER: 5555555555554444
+AGENT: Please share the expiry in MM/YYYY format and CVV.
+
+USER: 12/2027
+AGENT: Please share your CVV.
+
+USER: 123
 AGENT: Payment of INR 500.00 using card ending 4444 is ready. Please reply yes to confirm or no to cancel.
 
 USER: yes
@@ -240,15 +252,15 @@ This example starts after payment preparation.
 AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
 
 USER: yes
-AGENT: The card number appears to be invalid. Please share the full card number again.
+AGENT: The card details could not be validated. Please share the cardholder name, full card number, expiry in MM/YYYY format, and CVV again.
 
-USER: 4532015112830366
+USER: Nithin Jain 4532015112830366 12/2027 123
 AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
 
 USER: yes
-AGENT: The card number appears to be invalid. Please share the full card number again.
+AGENT: The card details could not be validated. Please share the cardholder name, full card number, expiry in MM/YYYY format, and CVV again.
 
-USER: 4532015112830366
+USER: Nithin Jain 4532015112830366 12/2027 123
 AGENT: Payment of INR 500.00 using card ending 0366 is ready. Please reply yes to confirm or no to cancel.
 
 USER: yes

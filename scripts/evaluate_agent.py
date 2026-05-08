@@ -6,10 +6,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from enum import StrEnum
 from io import StringIO
 from pathlib import Path
-from typing import Callable
+from typing import Annotated, Callable
 
 # Suppress app console logs during evaluator runs.
 os.environ["LOG_CONSOLE_ENABLED"] = "false"
@@ -29,19 +28,16 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from rich.table import Table
+from settlesentry.agent.autonomous.graph import build_autonomous_graph
 from settlesentry.agent.interface import Agent
+from settlesentry.agent.modes import LLM_REQUIRED_MODES, AgentMode, mode_profile
 from settlesentry.agent.parsing.deterministic import DeterministicInputParser
 from settlesentry.agent.parsing.factory import CombinedInputParser, build_input_parser
 from settlesentry.agent.response.messages import ResponseContext, build_fallback_response
 from settlesentry.agent.response.writer import ResponseWriter, build_response_writer
 from settlesentry.agent.state import ConversationStep
 from settlesentry.core import settings
-from settlesentry.integrations.payments.schemas import (
-    AccountDetails,
-    LookupResult,
-    PaymentResult,
-    PaymentsAPIErrorCode,
-)
+from settlesentry.integrations.payments.schemas import AccountDetails, LookupResult, PaymentResult, PaymentsAPIErrorCode
 from settlesentry.security.redaction import redact_sensitive_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -93,13 +89,6 @@ SAMPLE_ACCOUNTS = {
         balance=Decimal("0.00"),
     ),
 }
-
-
-class EvalMode(StrEnum):
-    # Modes are evaluated separately due to different latency/reliability profiles.
-    LOCAL = "local"
-    LLM = "llm"
-    FULL_LLM = "full-llm"
 
 
 class SpyPaymentsClient:
@@ -229,29 +218,41 @@ class EvalScenario:
     payment_outcomes: list[PaymentResult] | None = None
 
 
-def make_agent(client: SpyPaymentsClient, mode: EvalMode) -> Agent:
-    if mode == EvalMode.LOCAL:
+def make_agent(client: SpyPaymentsClient, mode: AgentMode) -> Agent:
+    profile = mode_profile(mode)
+
+    if mode == AgentMode.DETERMINISTIC_WORKFLOW:
         return Agent(
             payments_client=client,
             parser=DeterministicInputParser(),
             responder=build_fallback_response,
-            grouped_card_collection=False,
+            grouped_card_collection=profile.grouped_card_collection,
         )
 
-    if mode == EvalMode.LLM:
+    if mode == AgentMode.LLM_PARSER_WORKFLOW:
         return Agent(
             payments_client=client,
             parser=build_input_parser(),
             responder=build_fallback_response,
-            grouped_card_collection=True,
+            grouped_card_collection=profile.grouped_card_collection,
         )
 
-    return Agent(
-        payments_client=client,
-        parser=build_input_parser(),
-        responder=build_response_writer(),
-        grouped_card_collection=True,
-    )
+    if mode == AgentMode.LLM_PARSER_RESPONDER_WORKFLOW:
+        return Agent(
+            payments_client=client,
+            parser=build_input_parser(),
+            responder=build_response_writer(),
+            grouped_card_collection=profile.grouped_card_collection,
+        )
+
+    if mode == AgentMode.LLM_AUTONOMOUS_AGENT:
+        return Agent(
+            payments_client=client,
+            grouped_card_collection=profile.grouped_card_collection,
+            graph=build_autonomous_graph(),
+        )
+
+    raise ValueError(f"Unsupported eval mode: {mode}")
 
 
 def scan_privacy_leaks(message: str) -> list[str]:
@@ -287,7 +288,7 @@ def scan_privacy_leaks(message: str) -> list[str]:
 
 def run_scenario_once(
     scenario: EvalScenario,
-    mode: EvalMode,
+    mode: AgentMode,
     repeat_index: int,
 ) -> ScenarioResult:
     # Fresh agent per scenario prevents cross-scenario state leakage.
@@ -370,7 +371,7 @@ def run_scenario_once(
 
 def run_scenario_with_retries(
     scenario: EvalScenario,
-    mode: EvalMode,
+    mode: AgentMode,
     repeat_index: int,
     max_attempts: int,
 ) -> ScenarioResult:
@@ -526,10 +527,38 @@ def assert_full_balance_payment(
     )
 
 
+def has_account_not_found_message(records: list[TurnRecord]) -> bool:
+    patterns = (
+        r"could not find",
+        r"could not be found",
+        r"not found",
+        r"couldn't find",
+        r"unable to find",
+        r"unable to locate",
+    )
+
+    return any(any(re.search(pattern, record.agent_message.lower()) for pattern in patterns) for record in records)
+
+
+def has_amount_exceeds_balance_message(records: list[TurnRecord]) -> bool:
+    patterns = (
+        r"cannot exceed",
+        r"can't exceed",
+        r"must not exceed",
+        r"should not exceed",
+        r"exceeds? (?:the |your )?outstanding balance",
+        r"higher than (?:the |your )?outstanding balance",
+        r"more than (?:the |your )?outstanding balance",
+        r"above (?:the |your )?outstanding balance",
+    )
+
+    return any(any(re.search(pattern, record.agent_message.lower()) for pattern in patterns) for record in records)
+
+
 def assert_account_not_found_recovery(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
-    has_clear_error = any("could not find" in record.agent_message.lower() for record in records)
+    has_clear_error = has_account_not_found_message(records)
 
     ok = (
         agent.state.has_account_loaded()
@@ -552,7 +581,7 @@ def assert_account_not_found_recovery(
 def assert_amount_exceeds_balance(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
-    has_clear_error = any("cannot exceed" in record.agent_message.lower() for record in records)
+    has_clear_error = has_amount_exceeds_balance_message(records)
 
     ok = (
         not agent.state.completed
@@ -715,7 +744,7 @@ def assert_valid_amount_correction(
 def assert_invalid_amount_correction(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
-    has_clear_error = any("cannot exceed" in record.agent_message.lower() for record in records)
+    has_clear_error = has_amount_exceeds_balance_message(records)
 
     ok = (
         agent.state.payment_amount is None
@@ -737,22 +766,28 @@ def assert_invalid_amount_correction(
 def assert_payment_failure_recovery(
     agent: Agent, client: SpyPaymentsClient, records: list[TurnRecord]
 ) -> tuple[bool, str, dict]:
-    has_invalid_card_message = any(
-        "card number appears to be invalid" in record.agent_message.lower() for record in records
+    has_card_details_retry_message = any(
+        "card details" in record.agent_message.lower()
+        or (
+            "cardholder name" in record.agent_message.lower()
+            and "card number" in record.agent_message.lower()
+            and "cvv" in record.agent_message.lower()
+        )
+        for record in records
     )
 
     ok = (
         agent.state.completed
         and agent.state.transaction_id == "txn_eval_success"
         and len(client.payment_calls) == 2
-        and has_invalid_card_message
+        and has_card_details_retry_message
     )
 
     return assertion_result(
         ok,
         "payment failure recovery failed",
         payment_recovery_success=int(ok),
-        clear_error_message=int(has_invalid_card_message),
+        clear_error_message=int(has_card_details_retry_message),
         payment_calls=len(client.payment_calls),
     )
 
@@ -890,7 +925,15 @@ SCENARIOS = [
     EvalScenario(
         "payment_failure_recovery",
         "recovery",
-        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes", "4532 0151 1283 0366", "yes"],
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES
+        + [
+            "yes",
+            "Nithin Jain",
+            "4532 0151 1283 0366",
+            "12/2027",
+            "123",
+            "yes",
+        ],
         assert_payment_failure_recovery,
         payment_outcomes=[
             invalid_card_result(),
@@ -900,7 +943,20 @@ SCENARIOS = [
     EvalScenario(
         "payment_attempts_exhausted_closes",
         "failure_close",
-        BASE_VERIFIED_PAYMENT_READY_MESSAGES + ["yes", "4532 0151 1283 0366", "yes", "4532 0151 1283 0366", "yes"],
+        BASE_VERIFIED_PAYMENT_READY_MESSAGES
+        + [
+            "yes",
+            "Nithin Jain",
+            "4532 0151 1283 0366",
+            "12/2027",
+            "123",
+            "yes",
+            "Nithin Jain",
+            "4532 0151 1283 0366",
+            "12/2027",
+            "123",
+            "yes",
+        ],
         assert_payment_attempts_exhausted,
         payment_outcomes=[
             invalid_card_result(),
@@ -910,8 +966,7 @@ SCENARIOS = [
     ),
 ]
 
-LLM_CORE_SCENARIOS = {
-    # LLM default coverage is smaller to control runtime and provider spend.
+LLM_PARSER_WORKFLOW_SCENARIOS = {
     "happy_path_partial_payment",
     "account_not_found_then_recovery",
     "amount_exceeds_balance_before_card_collection",
@@ -921,8 +976,18 @@ LLM_CORE_SCENARIOS = {
     "payment_failure_recovery",
 }
 
-FULL_LLM_SMOKE_SCENARIOS = {
+LLM_PARSER_RESPONDER_WORKFLOW_SCENARIOS = {
     "happy_path_partial_payment",
+    "side_question_preserves_pending_state",
+    "cancel_at_confirmation_closes_without_payment",
+}
+
+LLM_AUTONOMOUS_AGENT_SCENARIOS = {
+    "happy_path_partial_payment",
+    "account_not_found_then_recovery",
+    "amount_exceeds_balance_before_card_collection",
+    "verification_failure_then_recovery",
+    "secondary_factor_failure_then_recovery",
     "side_question_preserves_pending_state",
     "cancel_at_confirmation_closes_without_payment",
 }
@@ -930,43 +995,81 @@ FULL_LLM_SMOKE_SCENARIOS = {
 
 def scenarios_for_mode(
     *,
-    mode: EvalMode,
+    mode: AgentMode,
     exhaustive: bool,
 ) -> list[EvalScenario]:
     if exhaustive:
         return SCENARIOS
 
-    if mode == EvalMode.LOCAL:
+    if mode == AgentMode.DETERMINISTIC_WORKFLOW:
         return SCENARIOS
 
-    if mode == EvalMode.LLM:
-        return [scenario for scenario in SCENARIOS if scenario.name in LLM_CORE_SCENARIOS]
+    if mode == AgentMode.LLM_PARSER_WORKFLOW:
+        return [scenario for scenario in SCENARIOS if scenario.name in LLM_PARSER_WORKFLOW_SCENARIOS]
 
-    if mode == EvalMode.FULL_LLM:
-        return [scenario for scenario in SCENARIOS if scenario.name in FULL_LLM_SMOKE_SCENARIOS]
+    if mode == AgentMode.LLM_PARSER_RESPONDER_WORKFLOW:
+        return [scenario for scenario in SCENARIOS if scenario.name in LLM_PARSER_RESPONDER_WORKFLOW_SCENARIOS]
 
-    return SCENARIOS
+    if mode == AgentMode.LLM_AUTONOMOUS_AGENT:
+        return [scenario for scenario in SCENARIOS if scenario.name in LLM_AUTONOMOUS_AGENT_SCENARIOS]
+
+    raise ValueError(f"Unsupported eval mode: {mode}")
 
 
-def resolve_modes(run_all: bool, requested_mode: str) -> list[EvalMode]:
-    # Skip LLM modes when OpenRouter credentials are unavailable.
+def filter_scenarios(
+    scenarios: list[EvalScenario],
+    selected_names: list[str] | None,
+) -> list[EvalScenario]:
+    if not selected_names:
+        return scenarios
+
+    if isinstance(selected_names, str):
+        selected_names = [selected_names]
+
+    if not isinstance(selected_names, list):
+        raise TypeError(
+            f"selected_names must be list[str] | None, got {type(selected_names).__name__}"
+        )
+
+    selected = set(selected_names)
+    available = {scenario.name for scenario in scenarios}
+    unknown = selected - available
+
+    if unknown:
+        raise SystemExit(
+            "Unknown scenario(s): "
+            + ", ".join(sorted(unknown))
+            + "\nAvailable scenarios: "
+            + ", ".join(sorted(available))
+        )
+
+    return [scenario for scenario in scenarios if scenario.name in selected]
+
+
+def resolve_modes(run_all: bool, requested_mode: str) -> list[AgentMode]:
     if not run_all:
-        mode = EvalMode(requested_mode)
+        mode = AgentMode(requested_mode)
 
-        if mode in {EvalMode.LLM, EvalMode.FULL_LLM} and not settings.llm.api_key:
+        if mode in LLM_REQUIRED_MODES and not settings.llm.api_key:
             raise SystemExit(
                 f"OPENROUTER_API_KEY is missing. Cannot evaluate mode={mode.value}. "
-                "Use --mode local or set OPENROUTER_API_KEY."
+                "Set OPENROUTER_API_KEY or choose deterministic-workflow."
             )
 
         return [mode]
 
-    modes = [EvalMode.LOCAL]
+    modes = [AgentMode.DETERMINISTIC_WORKFLOW]
 
     if settings.llm.api_key:
-        modes.extend([EvalMode.LLM, EvalMode.FULL_LLM])
+        modes.extend(
+            [
+                AgentMode.LLM_PARSER_WORKFLOW,
+                AgentMode.LLM_PARSER_RESPONDER_WORKFLOW,
+                AgentMode.LLM_AUTONOMOUS_AGENT,
+            ]
+        )
     else:
-        CONSOLE.print("[yellow]Skipping llm and full-llm modes because OPENROUTER_API_KEY is missing.[/yellow]")
+        CONSOLE.print("[yellow]Skipping LLM-required modes because OPENROUTER_API_KEY is missing.[/yellow]")
 
     return modes
 
@@ -1182,6 +1285,7 @@ def build_failed_turn_trace_table(results: list[ScenarioResult], *, ascii_only: 
     table.add_column("Amount", style="white")
     table.add_column("Confirmed", style="white")
     table.add_column("Completed", style="white")
+    table.add_column("Lookup Calls", style="white")
     table.add_column("Payment Calls", style="white")
 
     for result in results:
@@ -1199,6 +1303,7 @@ def build_failed_turn_trace_table(results: list[ScenarioResult], *, ascii_only: 
                 record.payment_amount or "",
                 str(record.payment_confirmed),
                 str(record.completed),
+                str(record.lookup_calls),
                 str(record.payment_calls),
             )
 
@@ -1237,7 +1342,7 @@ def write_dated_evaluation_report(
     fallback_ok: bool,
     fallback_reason: str,
     fallback_metrics: dict[str, int],
-    modes: list[EvalMode],
+    modes: list[AgentMode],
     exhaustive: bool,
     repeats: int,
     llm_repeats: int,
@@ -1296,12 +1401,17 @@ def main(
         "--all/--no-all",
         help="Run all available modes. Enabled by default. Use --no-all with --mode for a single mode.",
     ),
-    mode: EvalMode = typer.Option(
-        EvalMode.LOCAL,
-        "--mode",
-        case_sensitive=False,
-        help="Single mode to evaluate when --no-all is used.",
-    ),
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            "-m",
+            help=(
+                "Evaluation mode: deterministic-workflow, llm-parser-workflow, "
+                "llm-parser-responder-workflow, or llm-autonomous-agent."
+            ),
+        ),
+    ] = AgentMode.DETERMINISTIC_WORKFLOW.value,
     repeats: int = typer.Option(
         EVALUATOR_CONFIG.local_repeats_default,
         "--repeats",
@@ -1314,6 +1424,13 @@ def main(
         min=1,
         help="Repeats for llm and full-llm modes.",
     ),
+    scenario_names: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--scenario",
+            help="Run only the named scenario. Can be passed multiple times.",
+        ),
+    ] = None,
     scenario_retries: int = typer.Option(
         EVALUATOR_CONFIG.scenario_retries_default,
         "--scenario-retries",
@@ -1326,17 +1443,16 @@ def main(
         help="Run every scenario for every selected mode. Disabled by default to avoid excessive LLM calls.",
     ),
 ) -> None:
-    modes = resolve_modes(run_all=run_all, requested_mode=mode.value)
+    modes = resolve_modes(run_all=run_all, requested_mode=mode)
 
     results: list[ScenarioResult] = []
 
     for mode in modes:
-        mode_repeats = llm_repeats if mode in {EvalMode.LLM, EvalMode.FULL_LLM} else repeats
-
-        mode_scenarios = scenarios_for_mode(
-            mode=mode,
-            exhaustive=exhaustive,
+        mode_repeats = (
+            llm_repeats if mode in {AgentMode.LLM_PARSER_WORKFLOW, AgentMode.LLM_PARSER_RESPONDER_WORKFLOW} else repeats
         )
+
+        mode_scenarios = filter_scenarios(scenarios_for_mode(mode=mode, exhaustive=exhaustive), scenario_names)
 
         mode_total_runs = len(mode_scenarios) * mode_repeats
         CONSOLE.print(f"Running {mode_total_runs} scenarios for mode {mode.value}")
@@ -1359,14 +1475,14 @@ def main(
             )
 
             for repeat_index in range(1, mode_repeats + 1):
-                for scenario in mode_scenarios:
+                for eval_scenario in mode_scenarios:
                     progress.update(
                         task_id,
-                        current_run=f"{scenario.name} (repeat {repeat_index})",
+                        current_run=f"{eval_scenario.name} (repeat {repeat_index})",
                     )
                     results.append(
                         run_scenario_with_retries(
-                            scenario=scenario,
+                            scenario=eval_scenario,
                             mode=mode,
                             repeat_index=repeat_index,
                             max_attempts=scenario_retries,

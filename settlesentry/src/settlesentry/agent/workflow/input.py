@@ -13,8 +13,8 @@ from settlesentry.agent.workflow.constants import (
 )
 from settlesentry.agent.workflow.helpers import (
     clear_account_context,
+    clear_card_details,
     clear_payment_context,
-    clear_payment_secrets,
     result,
     validate_payment_amount,
 )
@@ -73,7 +73,7 @@ def submit_user_input(deps: AgentDeps, user_input: str) -> AgentToolResult:
 
     if extracted.intent == UserIntent.CANCEL or extracted.proposed_action == ProposedAction.CANCEL:
         deps.state.mark_closed()
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
         return result(deps, operation, ok=True, status="cancelled")
 
     if extracted.intent in SIDE_QUESTION_INTENTS:

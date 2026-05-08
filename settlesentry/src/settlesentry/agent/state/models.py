@@ -92,10 +92,13 @@ class ConversationStep(StrEnum):
 
 class SafeConversationState(BaseModel):
     """
-    Privacy-safe state view exposed to tools, LLM responses, and logs.
+    Restricted state view exposed to tools, LLM responses, and debug views.
 
     Never include DOB, Aadhaar, pincode, full card number, CVV, raw account
     details, last_error, or event_log here.
+
+    account_id is included for workflow continuity but is treated as sensitive
+    in logs and redacted by the logging layer.
     """
     # Safe state is the only state allowed in responses/log summaries. Do not add
     # sensitive values here.

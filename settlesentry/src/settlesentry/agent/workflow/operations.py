@@ -10,18 +10,19 @@ from settlesentry.agent.policy import (
     VERIFY_IDENTITY_POLICY,
     identity_matches_account,
 )
-from settlesentry.agent.state import ConversationStep
+from settlesentry.agent.state import ConversationStep, ExtractedUserInput
 from settlesentry.agent.workflow.constants import (
     AMOUNT_RETRY_ERRORS,
     LOOKUP_SERVICE_ERROR_STATUSES,
     TERMINAL_PAYMENT_SERVICE_ERRORS,
 )
 from settlesentry.agent.workflow.helpers import (
+    clear_card_details,
     clear_identity_inputs,
-    clear_payment_secrets,
     clear_secondary_identity_inputs,
     policy_blocked,
     result,
+    validate_payment_amount,
 )
 from settlesentry.agent.workflow.result import AgentToolResult
 from settlesentry.agent.workflow.routing import (
@@ -63,6 +64,7 @@ def lookup_account(deps: AgentDeps) -> AgentToolResult:
     lookup_result = deps.payments_client.lookup_account(deps.state.account_id or "")
 
     if not lookup_result.ok or lookup_result.account is None:
+        deps.state.account_id = None
         deps.state.account = None
         deps.state.last_error = lookup_result.message
         deps.state.step = ConversationStep.WAITING_FOR_ACCOUNT_ID
@@ -113,6 +115,7 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
         balance = deps.state.outstanding_balance()
         if balance is not None and balance <= Decimal("0") and not settings.agent_policy.allow_zero_balance_payment:
             deps.state.mark_closed()
+            clear_card_details(deps)
             return result(
                 deps,
                 operation,
@@ -147,7 +150,7 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
 
     if attempts_remaining <= 0:
         deps.state.mark_closed()
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
 
         return result(
             deps,
@@ -167,6 +170,116 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
         status="identity_verification_failed",
         required_fields=fields,
         facts={"attempts_remaining": attempts_remaining},
+    )
+
+
+def capture_payment_amount(
+    deps: AgentDeps,
+    extracted: ExtractedUserInput,
+) -> AgentToolResult:
+    """Capture and validate payment amount, then sync the next required step."""
+    operation = OperationLogContext(operation="capture_payment_amount")
+
+    if deps.state.completed:
+        return result(deps, operation, ok=False, status="conversation_closed")
+
+    if extracted.payment_amount is None:
+        fields = required_fields(deps)
+        set_step_from_required_fields(deps, fields)
+
+        return result(
+            deps,
+            operation,
+            ok=False,
+            status="missing_payment_amount",
+            required_fields=fields,
+        )
+
+    deps.state.merge(extracted.model_copy(update={"confirmation": None}))
+
+    blocked = validate_payment_amount(deps, operation)
+    if blocked is not None:
+        return blocked
+
+    fields = required_fields(deps)
+    node = recommended_node(deps)
+    set_step_from_required_fields(deps, fields)
+
+    return result(
+        deps,
+        operation,
+        ok=True,
+        status="payment_amount_captured",
+        required_fields=fields,
+        recommended_tool=node,
+    )
+
+
+def capture_card_details(
+    deps: AgentDeps,
+    extracted: ExtractedUserInput,
+) -> AgentToolResult:
+    """Capture partial or complete card details, then sync the next required step."""
+    operation = OperationLogContext(operation="capture_card_details")
+
+    if deps.state.completed:
+        return result(deps, operation, ok=False, status="conversation_closed")
+
+    has_card_detail = any(
+        getattr(extracted, field) is not None
+        for field in (
+            "cardholder_name",
+            "card_number",
+            "cvv",
+            "expiry_month",
+            "expiry_year",
+        )
+    )
+
+    if not has_card_detail:
+        fields = required_fields(deps)
+        set_step_from_required_fields(deps, fields)
+
+        return result(
+            deps,
+            operation,
+            ok=False,
+            status="missing_card_fields",
+            required_fields=fields,
+        )
+
+    if not deps.state.verified or deps.state.payment_amount is None:
+        fields = required_fields(deps)
+        set_step_from_required_fields(deps, fields)
+
+        return result(
+            deps,
+            operation,
+            ok=False,
+            status="payment_amount_required",
+            required_fields=fields,
+        )
+
+    deps.state.merge(extracted.model_copy(update={"confirmation": None}))
+
+    fields = required_fields(deps)
+    node = recommended_node(deps)
+    set_step_from_required_fields(deps, fields)
+
+    facts: dict[str, object] = {}
+
+    card_last4 = deps.state.card_last4()
+    if card_last4:
+        facts["card_last4"] = card_last4
+
+    return result(
+        deps,
+        operation,
+        ok=True,
+        status="card_details_captured",
+        required_fields=fields,
+        recommended_tool=node,
+        facts=facts,
     )
 
 
@@ -245,7 +358,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
     if payment_result.ok:
         deps.state.transaction_id = payment_result.transaction_id
         deps.state.step = ConversationStep.PAYMENT_SUCCESS
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
 
         return result(
             deps,
@@ -262,7 +375,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
     if payment_result.error_code in TERMINAL_PAYMENT_SERVICE_ERRORS:
         # Close on ambiguous service failures to avoid unsafe retries.
         deps.state.mark_closed()
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
 
         return result(
             deps,
@@ -275,26 +388,25 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
             },
         )
 
-    # Retryable errors clear only impacted fields.
+    # Retryable errors clear the impacted payment context.
     if payment_result.error_code in AMOUNT_RETRY_ERRORS:
         deps.state.payment_amount = None
+        clear_card_details(deps)
 
-    if payment_result.error_code in {PaymentsAPIErrorCode.INVALID_CARD, None}:
-        deps.state.card_number = None
-
-    if payment_result.error_code in {PaymentsAPIErrorCode.INVALID_CVV, None}:
-        deps.state.cvv = None
-
-    if payment_result.error_code == PaymentsAPIErrorCode.INVALID_EXPIRY:
-        deps.state.expiry_month = None
-        deps.state.expiry_year = None
+    elif payment_result.error_code in {
+        PaymentsAPIErrorCode.INVALID_CARD,
+        PaymentsAPIErrorCode.INVALID_CVV,
+        PaymentsAPIErrorCode.INVALID_EXPIRY,
+        None,
+    }:
+        clear_card_details(deps)
 
     attempts_remaining = settings.agent_policy.payment_max_attempts - deps.state.payment_attempts
 
     if attempts_remaining <= 0:
         # Retry budget exhausted: close safely and clear secrets.
         deps.state.mark_closed()
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
 
         return result(
             deps,
@@ -336,7 +448,7 @@ def recap_and_close(deps: AgentDeps) -> AgentToolResult:
 
     # Final recap uses safe facts; raw card data is cleared before close.
     deps.state.mark_closed()
-    clear_payment_secrets(deps)
+    clear_card_details(deps)
 
     return result(
         deps,

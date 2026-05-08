@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.policy import PolicyDecision, VALIDATE_PAYMENT_AMOUNT_POLICY
+from settlesentry.agent.policy import VALIDATE_PAYMENT_AMOUNT_POLICY, PolicyDecision
 from settlesentry.agent.response.messages import ResponseContext
 from settlesentry.agent.state import SafeConversationState
 from settlesentry.agent.workflow.result import AgentToolResult
@@ -12,7 +12,7 @@ from settlesentry.agent.workflow.routing import (
 )
 from settlesentry.core import OperationLogContext, get_logger
 
-logger = get_logger("AgentNodes")
+logger = get_logger("AgentOperations")
 
 
 def safe_state_summary(deps: AgentDeps) -> SafeConversationState:
@@ -71,7 +71,7 @@ def result(
     )
 
     logger.info(
-        "agent_node_completed",
+        "agent_operation_completed",
         extra=operation.completed_extra(
             session_id=deps.session_id,
             node_name=operation.operation,
@@ -122,7 +122,7 @@ def clear_secondary_identity_inputs(deps: AgentDeps) -> None:
 
 
 def clear_payment_secrets(deps: AgentDeps) -> None:
-    # Always clear full card number and CVV after terminal outcomes.
+    # Minimal scrub utility; prefer clear_card_details for terminal cleanup.
     deps.state.card_number = None
     deps.state.cvv = None
 
@@ -150,3 +150,12 @@ def clear_account_context(deps: AgentDeps) -> None:
     deps.state.provided_pincode = None
     clear_payment_context(deps)
     deps.state.last_error = None
+
+
+def clear_card_details(deps: AgentDeps) -> None:
+    deps.state.cardholder_name = None
+    deps.state.card_number = None
+    deps.state.cvv = None
+    deps.state.expiry_month = None
+    deps.state.expiry_year = None
+    deps.state.payment_confirmed = False

@@ -1,4 +1,4 @@
-﻿# Evaluation Approach
+# Evaluation Approach
 
 ## Objective
 
@@ -73,7 +73,7 @@ The automated evaluator covers end-to-end payment success, verification failures
 | `payment_recovery_success_rate` | Percentage of payment API recovery scenarios handled correctly |
 | `confirmation_gate_success_rate` | Percentage of confirmation-gate scenarios that prevented premature payment |
 
-Metrics that are not exercised by the selected scenario subset are reported as `N/A`, not `0.00%`. This separates “not evaluated in this run” from “evaluated and failed.”
+Metrics that are not exercised by the selected scenario subset are reported as `N/A`, not `0.00%`. This separates "not evaluated in this run" from "evaluated and failed."
 
 ## Automated Evaluation
 
@@ -89,23 +89,19 @@ The tests cover workflow state transitions, verification behavior, policy gates,
 
 ### Scenario Evaluator
 
-Run the deterministic local scenario evaluator:
+Run one selected mode:
 
 ```bash
-uv run python scripts/evaluate_agent.py --no-all --mode local
-```
-
-Run LLM-assisted modes when OpenRouter credentials are configured:
-
-```bash
-uv run python scripts/evaluate_agent.py --no-all --mode llm
-uv run python scripts/evaluate_agent.py --no-all --mode full-llm
+uv run python scripts/evaluate_agent.py --no-all --mode deterministic-workflow
+uv run python scripts/evaluate_agent.py --no-all --mode llm-parser-workflow
+uv run python scripts/evaluate_agent.py --no-all --mode llm-parser-responder-workflow
+uv run python scripts/evaluate_agent.py --no-all --mode llm-autonomous-agent
 ```
 
 Run the full scenario matrix for one selected mode:
 
 ```bash
-uv run python scripts/evaluate_agent.py --no-all --mode full-llm --exhaustive
+uv run python scripts/evaluate_agent.py --no-all --mode llm-autonomous-agent --exhaustive
 ```
 
 Run all configured modes:
@@ -118,6 +114,16 @@ Run all configured modes with the full scenario matrix:
 
 ```bash
 uv run python scripts/evaluate_agent.py --all --exhaustive
+```
+
+Run targeted scenarios:
+
+```bash
+uv run python scripts/evaluate_agent.py \
+  --all \
+  --exhaustive \
+  --scenario verification_exhaustion_closes \
+  --scenario payment_attempts_exhausted_closes
 ```
 
 Full LLM-assisted evaluation can take significantly longer depending on model latency, retries, and scenario count.
@@ -134,22 +140,27 @@ The evaluator reports:
 
 When a scenario fails, the evaluator can include a redacted turn trace showing user input, agent response, workflow step, payment amount, confirmation status, completion status, and payment-call count after each turn.
 
-By default, only the latest 3 evaluation text reports are retained.
+By default, only the latest 10 evaluation text reports are retained.
 
 ## Sample Evaluation Snapshot
 
 ```bash
-uv run python scripts/evaluate_agent.py --no-all --mode local
+uv run python scripts/evaluate_agent.py --all --exhaustive
 ```
 
-| Mode | Passed / Total | Success Rate | Avg / Run |
-|---|---:|---:|---:|
-| local | 15 / 15 | 100.00% | 0.03s |
+Latest exhaustive snapshot (see [evaluation sample](evaluation_sample.md)):
+
+| Mode | Passed / Total | Success Rate | Notes |
+|---|---:|---:|---|
+| deterministic-workflow | 15 / 15 | 100.00% | no LLM dependency |
+| llm-parser-workflow | 15 / 15 | 100.00% | LLM parser with deterministic fallback |
+| llm-parser-responder-workflow | 15 / 15 | 100.00% | LLM parser/responder with deterministic fallback |
+| llm-autonomous-agent | 15 / 15 | 100.00% | LLM-led phase-scoped tool orchestration |
 
 | Metric | Result |
 |---|---:|
 | Run success rate | 100.00% |
-| Passed runs | 15 / 15 |
+| Passed runs | 60 / 60 |
 | Interface compliance rate | 100.00% |
 | Privacy leak count | 0 |
 | Premature payment calls | 0 |
@@ -163,9 +174,9 @@ uv run python scripts/evaluate_agent.py --no-all --mode local
 
 ## Mode-Specific Expectations
 
-### Local Mode
+### Deterministic Workflow Mode
 
-Local mode is the deterministic baseline.
+`deterministic-workflow` is the deterministic baseline.
 
 Expected use:
 
@@ -174,9 +185,9 @@ Expected use:
 - policy and state validation
 - evaluator-safe behavior without external LLM dependency
 
-### LLM Parser Mode
+### LLM Parser Workflow Mode
 
-LLM parser mode improves natural-language extraction while keeping deterministic response wording.
+`llm-parser-workflow` improves natural-language extraction while keeping deterministic response wording.
 
 Expected use:
 
@@ -185,15 +196,37 @@ Expected use:
 - correction detection
 - out-of-order input extraction
 
-### Full LLM Mode
+### LLM Parser Responder Workflow Mode
 
-Full LLM mode uses the LLM for both parsing and response phrasing, with deterministic fallback.
+`llm-parser-responder-workflow` uses the LLM for both parsing and response phrasing, with deterministic fallback.
 
 Expected use:
 
 - natural response quality checks
 - prompt adherence testing
 - safety-boundary validation under LLM-written responses
+
+### LLM Autonomous Agent Mode
+
+Autonomous mode uses the LLM to decide whether to ask a question or call one of the currently available phase-scoped tools. The model does not receive unrestricted tool access. Tool availability is scoped by workflow phase, and every payment-critical tool delegates to deterministic operations and policy checks.
+
+Expected use:
+
+- tool-orchestration evaluation
+- comparison against deterministic and hybrid modes
+- stress testing LLM-led recovery, confirmation, correction, and closure behavior
+- measuring latency and reliability tradeoffs of agentic control
+
+Key checks:
+
+- account-not-found recovery submits the next account ID for fresh lookup
+- identity retries call the identity tool instead of repeating prompts
+- verification exhaustion closes safely without balance disclosure
+- confirmation replies trigger payment processing only after preparation
+- amount corrections reset confirmation and require reconfirmation
+- card API failures clear the full card bundle and require fresh card details
+- cancellation closes without payment
+- safety audit prevents privacy leaks, false verification claims, false payment success, and vague terminal closure
 
 In all modes, verification, balance disclosure, payment authorization, and API execution remain controlled by deterministic workflow and policy gates.
 
@@ -215,7 +248,7 @@ For failed or suspicious runs, review:
 A release is evaluation-ready when:
 
 - all core tests pass
-- local mode passes the full scenario matrix
+- deterministic-workflow mode passes the full scenario matrix
 - LLM-assisted modes pass the selected smoke/core or exhaustive scenario set being used for release validation
 - fallback smoke checks pass
 - no interface-shape violations are detected
