@@ -18,7 +18,7 @@ settlesentry/
         deps.py                   # Session-scoped dependencies and conversation context
         actions.py                # Parser intent and proposed-action enums
         workflow/
-          graph.py                # LangGraph construction and edge wiring
+          graph.py                # LangGraph construction for deterministic and hybrid workflow modes
           routing.py              # Required-field resolution and next-node routing
           nodes.py                # LangGraph adapter nodes and node registry
           input.py                # User input ingestion, merge, side-question, and correction handling
@@ -26,9 +26,22 @@ settlesentry/
           helpers.py              # Shared workflow helpers, response context, and cleanup utilities
           constants.py            # Workflow intent, correction, and service-error constants
           result.py               # AgentToolResult model
+        autonomous/
+          graph.py                # LangGraph wrapper for autonomous LLM tool orchestration
+          runtime.py              # PydanticAI/OpenRouter autonomous agent runtime
+          memory.py               # Privacy-safe autonomous memory payload construction
+          prompts.py              # Autonomous agent instructions
+          safety.py               # User-facing message safety audit and fallback routing
+          tools/
+            account.py            # Account lookup toolset
+            identity.py           # Identity verification toolset
+            payment.py            # Amount, card, preparation, final confirmation, and payment toolsets
+            lifecycle.py          # Start, status, cancel, and close toolset
+            factory.py            # Phase-scoped tool surface construction
+            common.py             # Shared tool metadata, logging, and safe result helpers
         parsing/
           base.py                 # Parser protocols, expected fields, and parser context models
-          deterministic.py        # Rule-based parser for local mode and fallback repair
+          deterministic.py        # Rule-based parser for deterministic workflow mode and fallback repair
           llm.py                  # PydanticAI/OpenRouter parser wrapper
           prompts.py              # Parser instructions and prompt payload construction
           factory.py              # Parser builder and LLM/deterministic fallback composition

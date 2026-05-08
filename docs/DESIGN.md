@@ -4,7 +4,7 @@
 
 SettleSentry is a payment collection agent for controlled conversational workflows where a customer may need to verify their account, review an outstanding amount due, and complete a payment.
 
-The design goal is safe, auditable execution rather than open-ended chat. Language understanding can be assisted by an LLM, but payment authority stays with deterministic workflow, state, and policy controls.
+The design goal is safe, auditable execution rather than open-ended chat. Language understanding and conversation orchestration can be assisted by an LLM depending on the selected mode, but payment authority stays with deterministic workflow operations, structured state, and policy controls.
 
 The agent handles:
 
@@ -45,30 +45,54 @@ SettleSentry addresses this through layered control:
 ```mermaid
 flowchart TD
     U[User Message] --> I[Turn-Based Agent Interface]
-    I --> G[LangGraph Workflow]
 
-    G --> P[Language Understanding Layer]
-    P --> S[Conversation State]
-    S --> R{Routing + Policy Gates}
+    I --> M{Selected Mode}
 
-    R -->|Account Lookup Allowed| L[Account Lookup Integration]
-    R -->|Verification Ready| V[Identity Verification]
-    R -->|Payment Details Ready| C[Payment Preparation]
-    R -->|Confirmation Present| X[Payment Processing]
-    R -->|More Input Needed| Q[Clarification or Recovery Prompt]
-    R -->|Conversation Complete| Z[Recap and Closure]
+    M -->|deterministic-workflow| D[Deterministic Parser]
+    M -->|llm-parser-workflow| LP[LLM Parser with Deterministic Fallback]
+    M -->|llm-parser-responder-workflow| LR[LLM Parser + LLM Responder]
+    M -->|llm-autonomous-agent| AG[Autonomous LangGraph]
 
-    L --> M[Response Generation]
-    V --> M
-    C --> M
-    X --> M
-    Q --> M
-    Z --> M
+    D --> G[LangGraph Workflow]
+    LP --> G
+    LR --> G
 
-    M --> A[User-Facing Message]
+    AG --> MEM[Privacy-Safe Memory]
+    MEM --> ART[LLM Runtime]
+    ART --> TS[Phase-Scoped Tool Surface]
+
+    G --> OPS[Deterministic Workflow Operations]
+    TS --> OPS
+
+    OPS --> P[Policy Layer]
+    P --> ST[Conversation State]
+
+    OPS --> API[Lookup / Payment APIs]
+    API --> ST
+
+    ST --> RES[Operation / Tool Result]
+    P --> RES
+
+    RES -->|Workflow Modes| RC[Safe Response Context]
+    RES -->|Autonomous Mode| ART
+
+    RC --> RW[Deterministic / LLM Response Writer]
+    RW --> MSG[User-Facing Message]
+
+    ART --> AR[LLM Final Response]
+    AR --> SA[Autonomous Safety Audit]
+    SA -->|Safe| MSG
+    SA -->|Unsafe / Failed| FB[Deterministic Fallback Response]
+    FB --> MSG
 ```
 
+This diagram shows the component-level architecture. Detailed business routing decisions, retry handling, closure paths, and payment failure handling are shown separately in the policy and decision-flow diagram below.
+
 The workflow is graph-orchestrated and runs once per user turn. The same session preserves structured workflow state and recent conversation context, so the agent can handle short replies, corrections, retries, and out-of-order inputs without giving the LLM authority over payment-critical decisions.
+
+About different modes:
+- Modes 1-3 use a graph-routed workflow where parser and responder behavior vary by mode. 
+- Mode 4 uses an autonomous LLM tool-calling graph: the LLM chooses among phase-scoped tools, but each tool delegates to the same deterministic operations and policy gates.
 
 ## 4. Component Responsibilities
 
@@ -117,6 +141,24 @@ The workflow orchestrator controls progression across the payment collection lif
 The workflow advances only when the current state and policy checks allow the next operation. If more information is needed or an action is blocked, the graph routes to response generation instead of continuing blindly.
 
 This makes the workflow predictable, testable, and safer than a free-form LLM-driven flow.
+
+### Autonomous Tool-Orchestration Mode
+
+The fourth mode, `llm-autonomous-agent`, uses an LLM to decide whether to ask the next question or call one of the currently available tools. This mode is agentic at the conversation layer but bounded at the payment layer.
+
+The LLM receives a privacy-safe memory payload containing the latest user message, safe state, required fields, and redacted recent turns. It can only access toolsets exposed for the current workflow phase:
+
+- lifecycle tools for start, status, cancellation, and closure
+- account tools for account ID lookup
+- identity tools for full name and secondary-factor verification
+- amount tools for payment amount validation
+- card tools for card-detail capture
+- preparation tools for staging explicit confirmation
+- final confirmation tools for confirm/process, decline, and amount correction
+
+The tool surface is phase-scoped so the model cannot call payment-processing tools before account lookup, identity verification, amount validation, card collection, and explicit confirmation. Each tool delegates to deterministic workflow operations and policy gates.
+
+After the LLM writes a final response, the autonomous graph runs a safety audit. Unsafe, vague, or failed responses fall back to deterministic response generation.
 
 For package and module layout, see [settlesentry/README.md](../settlesentry/README.md).
 
@@ -169,37 +211,51 @@ Identity verification remains inside the agent. The payment API is called only a
 
 ```mermaid
 flowchart TD
-    A[User Turn Arrives] --> B[Understand Message and Update State]
-    B --> C{What Does the Workflow Need Next?}
+    A[User Turn Arrives] --> B[Understand Message / Tool Intent]
+    B --> C[Update Structured Conversation State]
+    C --> D{Next Required Step}
 
-    C -->|Account Lookup Needed| D{Lookup Allowed?}
-    D -->|No| D1[Ask for Account Information]
-    D -->|Yes| D2[Call Account Lookup]
+    D -->|Account ID Needed| A1[Ask for Account ID]
+    D -->|Account ID Present| A2{Account Lookup Allowed?}
+    A2 -->|No| A1
+    A2 -->|Yes| A3[Call Account Lookup API]
+    A3 -->|Not Found / Failed| A4[Ask for Correct Account ID]
+    A3 -->|Found| E[Ask for Full Name]
 
-    C -->|Verification Needed| E{Verification Inputs Ready?}
-    E -->|No| E1[Ask for Required Verification Input]
-    E -->|Yes| E2[Verify Identity]
+    D -->|Identity Needed| V1{Full Name + Secondary Factor Present?}
+    V1 -->|No| V2[Ask Only for Missing Verification Field]
+    V1 -->|Yes| V3{Identity Matches Account?}
+    V3 -->|No, Attempts Left| V4[Clear Failed Identity Inputs and Ask Retry]
+    V3 -->|No, Attempts Exhausted| V5[Close Without Payment]
+    V3 -->|Yes| V6{Outstanding Balance > 0?}
+    V6 -->|No| V7[Close: No Outstanding Balance]
+    V6 -->|Yes| V8[Reveal Outstanding Balance and Ask Amount]
 
-    E2 -->|Failed, Attempts Left| E3[Ask for Retry]
-    E2 -->|Failed, Attempts Exhausted| E4[Close Safely]
-    E2 -->|Passed| E5[Reveal Balance and Ask for Payment Amount]
+    D -->|Payment Amount Present| P1{Amount Valid?}
+    P1 -->|No / Exceeds Balance / Policy Limit| P2[Clear Invalid Amount and Ask Corrected Amount]
+    P1 -->|Yes| P3[Collect Card Details]
 
-    C -->|Payment Amount Provided| F{Amount Valid?}
-    F -->|No| F1[Ask for Valid Amount]
-    F -->|Yes| F2[Collect Payment Details]
+    D -->|Card Details Present| C1{Required Card Fields Complete?}
+    C1 -->|No| C2[Ask Only for Missing Card Fields]
+    C1 -->|Yes| C3[Prepare Payment Confirmation]
 
-    C -->|Payment Details Provided| G{Payment Ready for Confirmation?}
-    G -->|No| G1[Ask for Missing or Corrected Details]
-    G -->|Yes| G2[Ask for Explicit Confirmation]
+    C3 --> C4[Ask for Explicit Yes / No Confirmation]
 
-    C -->|Confirmation Received| H{Payment Processing Allowed?}
-    H -->|No| H1[Block Payment and Explain Next Step]
-    H -->|Yes| H2[Call Payment API]
+    D -->|Confirmation Pending| F1{Customer Reply}
+    F1 -->|No / Cancel / Stop| F2[Close Without Payment]
+    F1 -->|Amount Correction| F3[Validate Corrected Amount and Reconfirm]
+    F1 -->|Ambiguous / Repeat| F4[Ask for Explicit Confirmation Again]
+    F1 -->|Yes| F5{Processing Allowed?}
 
-    H2 --> I{Payment Outcome}
-    I -->|Success| I1[Return Transaction ID and Close]
-    I -->|Recoverable Failure| I2[Ask for Targeted Retry]
-    I -->|Terminal or Ambiguous Failure| I3[Close Safely]
+    F5 -->|No| F6[Block and Ask Required Recovery Field]
+    F5 -->|Yes| F7[Call Payment API]
+
+    F7 --> O{Payment Outcome}
+    O -->|Success| O1[Return Transaction ID and Close]
+    O -->|Invalid Amount| O2[Clear Amount + Card Context and Ask Amount Again]
+    O -->|Invalid Card / CVV / Expiry| O3[Clear Full Card Bundle and Ask Card Details Again]
+    O -->|Attempts Exhausted| O4[Close Without Payment]
+    O -->|Network / Timeout / Ambiguous Service Failure| O5[Close Safely Without Payment]
 ```
 
 ## 6. Generic Turn Sequence
@@ -210,39 +266,54 @@ This sequence describes how any user turn is processed. It is not limited to the
 sequenceDiagram
     participant User
     participant Interface as Turn Interface
-    participant Workflow as Workflow Orchestrator
-    participant Parser as Language Understanding
+    participant Orchestrator as LangGraph Orchestration
+    participant Language as Parser / LLM Runtime
+    participant Tools as Phase-Scoped Tools
+    participant Operations as Deterministic Operations
     participant State as Conversation State
     participant Policy as Policy Layer
-    participant API as External API
-    participant Response as Response Layer
+    participant API as External APIs
+    participant Response as Response / Safety Layer
 
     User->>Interface: Send message
-    Interface->>Workflow: Start one turn
+    Interface->>Orchestrator: Start one controlled turn
 
-    Workflow->>Parser: Interpret message using state and recent context
-    Parser-->>Workflow: Structured user intent and fields
+    Orchestrator->>State: Load session state and recent context
+    Orchestrator->>Language: Interpret turn using safe context
 
-    Workflow->>State: Update session context
-    Workflow->>Policy: Check allowed next action
-
-    alt More information is required
-        Policy-->>Workflow: Required field or clarification
-        Workflow->>Response: Build next question
-        Response-->>Interface: Clarification message
-    else Action is blocked
-        Policy-->>Workflow: Block reason and recovery path
-        Workflow->>Response: Build recovery message
-        Response-->>Interface: Recovery message
-    else External tool call is allowed
-        Workflow->>API: Call approved operation
-        API-->>Workflow: Success or failure result
-        Workflow->>State: Update outcome and retry or closure status
-        Workflow->>Response: Build outcome message
-        Response-->>Interface: Outcome or next-step message
+    alt Workflow modes
+        Language-->>Orchestrator: Extracted intent and fields
+        Orchestrator->>Operations: Run next workflow operation
+    else Autonomous mode
+        Language->>Tools: Select available phase-scoped tool
+        Tools->>Operations: Execute deterministic operation
+        Operations-->>Tools: Tool result
+        Tools-->>Language: Tool result for final response
     end
 
-    Interface-->>User: User-facing response
+    Operations->>Policy: Check allowed transition
+    Policy-->>Operations: Allowed, blocked, or needs input
+    Operations->>State: Update state, retry counters, or closure status
+
+    opt External API allowed
+        Operations->>API: Account lookup or payment processing
+        API-->>Operations: Success, retryable failure, or terminal failure
+        Operations->>State: Update outcome
+    end
+
+    alt Workflow modes
+        Operations->>Response: Build safe response context
+        Response-->>Interface: User-facing response
+    else Autonomous mode
+        Language->>Response: Submit LLM final response for safety audit
+        alt Response is safe
+            Response-->>Interface: LLM-written response
+        else Unsafe, incomplete, or runtime failed
+            Response-->>Interface: Deterministic fallback response
+        end
+    end
+
+    Interface-->>User: Return {"message": "..."}
 ```
 
 ## 7. Assumptions
@@ -268,20 +339,21 @@ The implementation makes the following assumptions:
 - The payment API may still reject card, CVV, expiry, amount, balance, or service-level failures.
 - The payment API does not persist balance updates after a successful payment.
 - Terminal service failures close safely to avoid ambiguous payment retries.
-- Raw card number and CVV are cleared after success, terminal failure, cancellation, or closure.
+- Cardholder name, full card number, expiry, and CVV are cleared after success, terminal failure, cancellation, or closure.
 - LLM behavior is optional and must not be required for deterministic local execution.
 
 ## 8. Key Design Decisions
 
 ### LLM is bounded, not authoritative
 
-The LLM can help interpret natural language and phrase replies, but it cannot:
+The LLM can help interpret natural language, phrase replies, and in autonomous mode request tool calls. It cannot:
 
-- verify identity
+- verify identity by itself
 - approve balance disclosure
-- authorize payment
-- bypass policy gates
-- directly execute payment API calls
+- authorize payment outside policy gates
+- bypass required workflow state
+- directly call external APIs
+- process payment unless the final confirmation tool and deterministic policy checks allow it
 
 This keeps payment authority in deterministic workflow and policy logic rather than model output.
 
@@ -330,7 +402,7 @@ The LLM cannot override policy checks. This limits flexibility but prevents unsa
 
 ### Graph orchestration adds implementation complexity
 
-A graph-based workflow is more structured than a procedural loop. The tradeoff is clearer workflow boundaries, better testability, and easier extension toward graph-native tool calling.
+A graph-based workflow is more structured than a procedural loop. The tradeoff is clearer workflow boundaries, better testability, and clearer separation between deterministic workflow modes and the autonomous tool-calling mode.
 
 ### In-memory state is sufficient for this implementation
 
@@ -344,12 +416,10 @@ The implementation accepts test card details to exercise the payment workflow. A
 
 Future improvements could include:
 
-- graph-native tool calling where the LLM proposes actions and the workflow/policy layer validates them
-- broader adversarial and simulation-based evaluation suites
-- persistent session storage
-- observability dashboards for workflow transitions and policy blocks
-- human handoff thresholds for repeated failures
-- stronger audit logs and redaction controls
+- broader adversarial evaluation for autonomous tool selection
+- persistent session storage and checkpointing
+- observability dashboards for tool calls, safety fallback, and policy blocks
+- human handoff thresholds for repeated verification or payment failures
 - configurable business policies by account or client segment
 - expanded localization and multilingual flow handling
 - PCI-DSS aligned tokenization or payment-provider handoff for real card data
