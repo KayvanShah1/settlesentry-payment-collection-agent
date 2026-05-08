@@ -1,6 +1,12 @@
-# SettleSentry Agent Evaluation
+# Evaluation Sample
 
-Generated at: `2026-05-08T00:59:53`  
+Generated from:
+
+```bash
+uv run python scripts/evaluate_agent.py --all --exhaustive
+```
+
+Generated at: `2026-05-08T17:49:03`  
 Modes: `deterministic-workflow`, `llm-parser-workflow`, `llm-parser-responder-workflow`, `llm-autonomous-agent`  
 Exhaustive: `True`  
 Repeats (local): `1`  
@@ -17,10 +23,10 @@ Scenario retries: `1`
 
 | Mode | Passed/Total | Success | First Attempt | Avg Attempts | Wall Time | Avg/Run |
 |---|---:|---:|---:|---:|---:|---:|
-| deterministic-workflow | 15/15 | 100.00% | 100.00% | 1.00 | 0.49s | 0.03s |
-| llm-parser-workflow | 15/15 | 100.00% | 100.00% | 1.00 | 1219.70s | 81.31s |
-| llm-parser-responder-workflow | 15/15 | 100.00% | 100.00% | 1.00 | 1883.53s | 125.57s |
-| llm-autonomous-agent | 15/15 | 100.00% | 100.00% | 1.00 | 1218.92s | 81.26s |
+| deterministic-workflow | 15/15 | 100.00% | 100.00% | 1.00 | 0.47s | 0.03s |
+| llm-parser-workflow | 15/15 | 100.00% | 100.00% | 1.00 | 1115.32s | 74.35s |
+| llm-parser-responder-workflow | 15/15 | 100.00% | 100.00% | 1.00 | 2031.34s | 135.42s |
+| llm-autonomous-agent | 15/15 | 100.00% | 100.00% | 1.00 | 1293.34s | 86.22s |
 
 ## Overall Metrics
 
@@ -28,14 +34,14 @@ Scenario retries: `1`
 |---|---:|
 | run_success_rate | 100.00% |
 | passed_runs | 60/60 |
-| total_wall_time_seconds | 4322.64s |
-| average_wall_time_seconds | 72.04s |
+| total_wall_time_seconds | 4440.47s |
+| average_wall_time_seconds | 74.01s |
 | interface_compliance_rate | 100.00% |
 | privacy_leak_count | 0 |
 | premature_payment_calls | 0 |
 | total_lookup_calls | 64 |
 | total_payment_calls | 28 |
-| average_turns_per_run | 8.58 |
+| average_turns_per_run | 8.60 |
 | clear_error_message_rate | 100.00% |
 | graceful_close_rate | 100.00% |
 | amount_guardrail_success_rate | 100.00% |
@@ -64,4 +70,5 @@ Scenario retries: `1`
 | recovery | payment_failure_recovery |
 | failure_close | payment_attempts_exhausted_closes |
 
-> All scenarios above passed in all four modes with one attempt each.
+> [!Note]
+> Latest exhaustive all-mode run passed the full scenario matrix with `0` privacy leaks and `0` premature payment calls.
