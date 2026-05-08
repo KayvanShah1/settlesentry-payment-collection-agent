@@ -16,7 +16,7 @@ app = typer.Typer(
 
 console = Console()
 
-DEFAULT_MODE = AgentMode.LLM_PARSER_WORKFLOW
+DEFAULT_MODE = AgentMode.LLM_AUTONOMOUS_AGENT
 
 ModeOption: TypeAlias = Annotated[
     AgentMode,
