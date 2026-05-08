@@ -11,6 +11,7 @@
 
 **SettleSentry** is a conversational payment collection agent for services where customers may have an outstanding amount due, such as cloud bills, mobile plans, subscriptions, or other recurring service balances. It verifies the customer first, shows the amount due only after verification, and guides payment collection through a controlled, policy-governed workflow.
 
+> [!Note]
 > SettleSentry guides payment collection to closure in **under 9 user turns on average**, with **1 min 14 sec automated completion time** with full policy compliance, **0 PII leaks** and no premature payment calls.
 
 The core design principle is separation of conversation intelligence from payment authority:
