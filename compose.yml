@@ -1,0 +1,37 @@
+services:
+  settlesentry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: settlesentry:latest
+    container_name: settlesentry-agent
+    stdin_open: true
+    tty: true
+    env_file:
+      - .env
+    environment:
+      LOG_CONSOLE_ENABLED: "false"
+    volumes:
+      - ./var:/app/var
+      - ./logs:/app/logs
+    command: ["chat", "--mode", "deterministic-workflow"]
+
+  settlesentry-autonomous:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: settlesentry:latest
+    container_name: settlesentry-autonomous-agent
+    stdin_open: true
+    tty: true
+    env_file:
+      - .env
+    environment:
+      LOG_CONSOLE_ENABLED: "false"
+      OPENROUTER_ENABLED: "true"
+    volumes:
+      - ./var:/app/var
+      - ./logs:/app/logs
+    command: ["chat", "--mode", "llm-autonomous-agent"]
+    profiles:
+      - llm
