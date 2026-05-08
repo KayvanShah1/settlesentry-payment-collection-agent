@@ -9,7 +9,7 @@ from settlesentry.agent.autonomous.tools.common import (
     verified_balance_facts,
 )
 from settlesentry.agent.deps import AgentDeps
-from settlesentry.agent.workflow.helpers import clear_payment_secrets
+from settlesentry.agent.workflow.helpers import clear_card_details
 from settlesentry.agent.workflow.helpers import result as workflow_result
 from settlesentry.agent.workflow.operations import greet_user
 from settlesentry.agent.workflow.routing import required_fields
@@ -96,7 +96,7 @@ def cancel_flow(ctx: RunContext[AgentDeps]) -> object:
 
     deps.state.payment_confirmed = False
     deps.state.mark_closed()
-    clear_payment_secrets(deps)
+    clear_card_details(deps)
 
     return workflow_result(
         deps,

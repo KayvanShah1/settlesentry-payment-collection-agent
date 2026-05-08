@@ -161,7 +161,10 @@ def test_node_workflow_completes_successful_payment_and_recap():
     assert result.recommended_tool == "recap_and_close"
     assert result.facts["transaction_id"] == "txn_123"
     assert deps.state.step == ConversationStep.PAYMENT_SUCCESS
+    assert deps.state.cardholder_name is None
     assert deps.state.card_number is None
+    assert deps.state.expiry_month is None
+    assert deps.state.expiry_year is None
     assert deps.state.cvv is None
 
     result = recap_and_close(deps)
@@ -180,6 +183,7 @@ def test_account_not_found_reprompts_for_account_id():
     assert result.ok is False
     assert result.status == "account_not_found"
     assert result.required_fields == ("account_id",)
+    assert deps.state.account_id is None
     assert deps.state.step == ConversationStep.WAITING_FOR_ACCOUNT_ID
     assert deps.state.has_account_loaded() is False
 
@@ -385,7 +389,10 @@ def test_terminal_payment_service_error_closes_safely():
     assert deps.state.completed is True
     assert deps.state.step == ConversationStep.CLOSED
     assert deps.state.transaction_id is None
+    assert deps.state.cardholder_name is None
     assert deps.state.card_number is None
+    assert deps.state.expiry_month is None
+    assert deps.state.expiry_year is None
     assert deps.state.cvv is None
 
 

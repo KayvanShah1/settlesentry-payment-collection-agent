@@ -202,6 +202,7 @@ def test_provide_account_id_handles_account_not_found(
     assert result.ok is False
     assert result.status == "account_not_found"
     assert result.required_fields == ("account_id",)
+    assert deps.state.account_id is None
     assert deps.state.has_account_loaded() is False
     assert payments_client.lookup_calls == ["BAD_ACCOUNT"]
 
@@ -391,7 +392,10 @@ def test_confirm_and_process_payment_success_closes_and_clears_secrets(
     assert result.facts["transaction_id"] == "txn_test_123"
     assert deps.state.completed is True
     assert deps.state.transaction_id == "txn_test_123"
+    assert deps.state.cardholder_name is None
     assert deps.state.card_number is None
+    assert deps.state.expiry_month is None
+    assert deps.state.expiry_year is None
     assert deps.state.cvv is None
     assert len(payments_client.payment_calls) == 1
 
@@ -434,7 +438,10 @@ def test_decline_payment_closes_without_processing(
     assert result.status == "cancelled"
     assert deps.state.completed is True
     assert deps.state.payment_confirmed is False
+    assert deps.state.cardholder_name is None
     assert deps.state.card_number is None
+    assert deps.state.expiry_month is None
+    assert deps.state.expiry_year is None
     assert deps.state.cvv is None
     assert payments_client.payment_calls == []
 
@@ -450,7 +457,10 @@ def test_cancel_flow_closes_without_processing(
     assert result.ok is True
     assert result.status == "cancelled"
     assert deps.state.completed is True
+    assert deps.state.cardholder_name is None
     assert deps.state.card_number is None
+    assert deps.state.expiry_month is None
+    assert deps.state.expiry_year is None
     assert deps.state.cvv is None
     assert payments_client.payment_calls == []
 

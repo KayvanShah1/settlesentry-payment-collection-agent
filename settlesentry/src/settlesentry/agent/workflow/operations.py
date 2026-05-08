@@ -19,7 +19,6 @@ from settlesentry.agent.workflow.constants import (
 from settlesentry.agent.workflow.helpers import (
     clear_card_details,
     clear_identity_inputs,
-    clear_payment_secrets,
     clear_secondary_identity_inputs,
     policy_blocked,
     result,
@@ -65,6 +64,7 @@ def lookup_account(deps: AgentDeps) -> AgentToolResult:
     lookup_result = deps.payments_client.lookup_account(deps.state.account_id or "")
 
     if not lookup_result.ok or lookup_result.account is None:
+        deps.state.account_id = None
         deps.state.account = None
         deps.state.last_error = lookup_result.message
         deps.state.step = ConversationStep.WAITING_FOR_ACCOUNT_ID
@@ -115,6 +115,7 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
         balance = deps.state.outstanding_balance()
         if balance is not None and balance <= Decimal("0") and not settings.agent_policy.allow_zero_balance_payment:
             deps.state.mark_closed()
+            clear_card_details(deps)
             return result(
                 deps,
                 operation,
@@ -149,7 +150,7 @@ def verify_identity(deps: AgentDeps) -> AgentToolResult:
 
     if attempts_remaining <= 0:
         deps.state.mark_closed()
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
 
         return result(
             deps,
@@ -357,7 +358,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
     if payment_result.ok:
         deps.state.transaction_id = payment_result.transaction_id
         deps.state.step = ConversationStep.PAYMENT_SUCCESS
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
 
         return result(
             deps,
@@ -374,7 +375,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
     if payment_result.error_code in TERMINAL_PAYMENT_SERVICE_ERRORS:
         # Close on ambiguous service failures to avoid unsafe retries.
         deps.state.mark_closed()
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
 
         return result(
             deps,
@@ -405,7 +406,7 @@ def process_payment(deps: AgentDeps) -> AgentToolResult:
     if attempts_remaining <= 0:
         # Retry budget exhausted: close safely and clear secrets.
         deps.state.mark_closed()
-        clear_payment_secrets(deps)
+        clear_card_details(deps)
 
         return result(
             deps,
@@ -447,7 +448,7 @@ def recap_and_close(deps: AgentDeps) -> AgentToolResult:
 
     # Final recap uses safe facts; raw card data is cleared before close.
     deps.state.mark_closed()
-    clear_payment_secrets(deps)
+    clear_card_details(deps)
 
     return result(
         deps,

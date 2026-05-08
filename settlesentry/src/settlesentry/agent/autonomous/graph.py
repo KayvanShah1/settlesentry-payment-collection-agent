@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -10,7 +11,7 @@ from settlesentry.agent.deps import AgentDeps
 from settlesentry.agent.response.messages import ResponseContext, build_fallback_response
 from settlesentry.agent.state.models import ConversationStep
 from settlesentry.agent.workflow.routing import required_fields
-from settlesentry.core import OperationLogContext, get_logger
+from settlesentry.core import OperationLogContext, get_logger, settings
 
 logger = get_logger("AutonomousGraph")
 
@@ -120,6 +121,16 @@ def fallback_status_from_state(graph_state: AutonomousGraphState) -> str:
         if state.transaction_id:
             return "conversation_closed"
 
+        if state.verification_attempts >= settings.agent_policy.verification_max_attempts:
+            return "verification_exhausted"
+
+        balance = state.outstanding_balance()
+        if state.verified and balance is not None and balance <= Decimal("0"):
+            return "zero_balance"
+
+        if state.payment_attempts >= settings.agent_policy.payment_max_attempts:
+            return "payment_attempts_exhausted"
+
         if state.payment_attempts > 0:
             return "payment_failed"
 
@@ -170,6 +181,18 @@ def fallback_response_node(graph_state: AutonomousGraphState) -> AutonomousGraph
         required_fields=required_fields(deps),
         facts=facts,
         safe_state=deps.state.safe_view(session_id=deps.session_id),
+    )
+
+    logger.info(
+        "autonomous_fallback_response_used",
+        extra={
+            "session_id": deps.session_id,
+            "step": deps.state.step.value,
+            "status": status,
+            "error_status": graph_state.get("error_status"),
+            "safety_audit_status": graph_state.get("safety_audit_status"),
+            "required_fields": ",".join(required_fields(deps)) or None,
+        },
     )
 
     return _update(

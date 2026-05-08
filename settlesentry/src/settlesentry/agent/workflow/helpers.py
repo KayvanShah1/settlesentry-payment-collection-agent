@@ -122,7 +122,7 @@ def clear_secondary_identity_inputs(deps: AgentDeps) -> None:
 
 
 def clear_payment_secrets(deps: AgentDeps) -> None:
-    # Always clear full card number and CVV after terminal outcomes.
+    # Minimal scrub utility; prefer clear_card_details for terminal cleanup.
     deps.state.card_number = None
     deps.state.cvv = None
 
