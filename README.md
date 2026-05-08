@@ -1,4 +1,4 @@
-﻿# SettleSentry: Payment Collection Agent
+﻿# SettleSentry: Payment Collection AI Agent
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Workflow%20Orchestration-1C3C3C)
@@ -100,7 +100,7 @@ The CLI supports four modes:
 | `llm-parser-responder-workflow` | LLM parser with deterministic fallback | LLM responder with deterministic fallback | LangGraph workflow routing | Natural extraction and response phrasing |
 | `llm-autonomous-agent` | LLM interprets the turn | LLM-written response with safety audit/fallback | LLM tool selection over phase-scoped tools | Autonomous agent ablation mode |
 
-The default CLI mode is `llm-parser-workflow`. Use `deterministic-workflow` when no OpenRouter API key is configured.
+The default CLI mode is `llm-autonomous-agent`. Use `deterministic-workflow` when no OpenRouter API key is configured.
 
 In every mode, payment authority remains deterministic and policy-controlled. The LLM does not verify identity, authorize balance disclosure, bypass policy gates, or process payment without explicit confirmation.
 
@@ -127,29 +127,59 @@ uv sync --all-packages
 
 LLM configuration is optional and required for `llm-parser-workflow`, `llm-parser-responder-workflow`, and `llm-autonomous-agent`.
 
+Start by copying the template and updating values for your environment:
+
 ```bash
-# Optional, required only for LLM modes
-OPENROUTER_API_KEY=...
+# macOS/Linux
+cp .env.example .env
 
-# Optional LLM tuning
-OPENROUTER_ENABLED=true
-OPENROUTER_MODEL=openrouter/free
-OPENROUTER_TIMEOUT_SECONDS=10
-OPENROUTER_TEMPERATURE=0.0
-OPENROUTER_MAX_TOKENS=300
-OPENROUTER_RETRIES=1
-
-# Optional API configuration
-API_BASE_URL=...
-API_TIMEOUT_SECONDS=30
-API_MAX_RETRIES=2
-
-# Optional agent policy configuration
-AGENT_POLICY_VERIFICATION_MAX_ATTEMPTS=3
-AGENT_POLICY_PAYMENT_MAX_ATTEMPTS=3
-AGENT_POLICY_ALLOW_PARTIAL_PAYMENTS=true
-AGENT_POLICY_ALLOW_ZERO_BALANCE_PAYMENT=false
+# PowerShell
+Copy-Item .env.example .env
 ```
+
+Full template: [`.env.example`](.env.example)
+
+### Runtime Configuration
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `OPENROUTER_API_KEY` | LLM modes only | unset | OpenRouter API key for LLM-enabled modes. |
+| `OPENROUTER_ENABLED` | No | `true` | Enables OpenRouter-backed parser/responder/autonomous runtime. |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenRouter API base URL. |
+| `OPENROUTER_MODEL` | No | `openrouter/free` | OpenRouter model identifier. |
+| `OPENROUTER_TIMEOUT_SECONDS` | No | `10` | LLM request timeout in seconds. |
+| `OPENROUTER_TEMPERATURE` | No | `0.0` | LLM temperature for response variability. |
+| `OPENROUTER_MAX_TOKENS` | No | `300` | Max tokens for LLM outputs. |
+| `OPENROUTER_RETRIES` | No | `1` | Retry count for LLM calls. |
+| `API_BASE_URL` | No | `https://se-payment-verification-api.service.external.usea2.aws.prodigaltech.com` | External payment/lookup API base URL. |
+| `API_TIMEOUT_SECONDS` | No | `30` | API timeout in seconds. |
+| `API_MAX_RETRIES` | No | `2` | Retry count for API calls. |
+| `AGENT_POLICY_VERIFICATION_MAX_ATTEMPTS` | No | `3` | Max identity verification attempts before closure. |
+| `AGENT_POLICY_PAYMENT_MAX_ATTEMPTS` | No | `3` | Max payment attempts before closure. |
+| `AGENT_POLICY_ALLOW_PARTIAL_PAYMENTS` | No | `true` | Allows partial payment amounts. |
+| `AGENT_POLICY_ALLOW_ZERO_BALANCE_PAYMENT` | No | `false` | Allows payment flow for zero-balance accounts. |
+| `AGENT_POLICY_MAX_PAYMENT_AMOUNT` | No | unset | Optional hard cap across payment amounts. |
+
+### Logging Configuration
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `LOG_LEVEL` | No | `INFO` | Application log level. |
+| `LOG_FILE_ENABLED` | No | `true` | Enables file logging. |
+| `LOG_CONSOLE_ENABLED` | No | `true` | Enables console logging. |
+| `LOG_FILE_NAME` | No | unset | Optional explicit log filename (defaults to `<project_name>.log`). |
+| `LOG_MAX_BYTES` | No | `2048000` | Max log file size before rotation. |
+| `LOG_BACKUP_COUNT` | No | `5` | Number of rotated log files to retain. |
+
+### Evaluator Configuration (`scripts/evaluate_agent.py`)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `EVAL_REPORT_RETENTION` | No | `10` | Number of dated evaluation reports to keep. |
+| `EVAL_LOCAL_REPEATS_DEFAULT` | No | `1` | Default repeat count for deterministic mode runs. |
+| `EVAL_LLM_REPEATS_DEFAULT` | No | `1` | Default repeat count for LLM mode runs. |
+| `EVAL_SCENARIO_RETRIES_DEFAULT` | No | `1` | Default per-scenario retry count in evaluator. |
+| `EVAL_REPORT_WIDTH` | No | `160` | Console/report rendering width for evaluator output. |
 
 ## Run the Agent
 
@@ -174,6 +204,53 @@ uv run settlesentry chat --mode llm-autonomous-agent --debug-logs
 ```
 
 If no OpenRouter API key is configured, use `deterministic-workflow` mode.
+
+## Run with Docker Compose
+
+SettleSentry can also be run from the published GitHub Container Registry image.
+
+Pull the latest image:
+
+```bash
+docker compose pull
+```
+
+Run deterministic workflow mode, which does not require an LLM API key:
+
+```bash
+docker compose run --rm settlesentry
+```
+
+Run autonomous LLM tool-calling mode with OpenRouter configured in `.env`:
+
+```bash
+docker compose --profile llm run --rm settlesentry-autonomous
+```
+
+Example `.env` for LLM modes:
+
+```env
+OPENROUTER_API_KEY=...
+OPENROUTER_ENABLED=true
+```
+
+The Compose setup uses the public GHCR image by default:
+
+```text
+ghcr.io/kayvanshah1/settlesentry-payment-collection-agent:latest
+```
+
+To build locally instead of pulling the published image:
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml run --rm settlesentry
+```
+
+Run the local build in autonomous mode:
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml --profile llm run --rm settlesentry-autonomous
+```
 
 ## Run Tests and Evaluation
 
