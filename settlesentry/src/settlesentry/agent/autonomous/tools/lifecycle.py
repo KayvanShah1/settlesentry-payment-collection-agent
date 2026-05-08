@@ -31,6 +31,8 @@ Use get_current_status when:
 Use cancel_flow when:
 - the customer asks to cancel, stop, exit, decline, or end the payment flow
 - the customer refuses to continue before payment processing
+- do not cancel for vague hesitation, side questions, or uncertainty
+- cancel only when the customer clearly asks to stop, cancel, exit, decline, or end the payment flow
 
 After cancellation or closure, do not collect more information.
 """.strip()

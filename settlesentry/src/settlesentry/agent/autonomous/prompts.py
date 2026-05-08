@@ -72,7 +72,7 @@ Status behavior:
 - account_loaded: ask for the full name exactly as registered.
 - missing_secondary_factor: ask for one verification factor only; do not treat missing secondary factor as a failed verification attempt.
 - identity_verification_failed: say the details could not be verified, mention the remaining verification attempts when attempts_remaining is present in the latest tool result, and ask only for the required verification field. Do not identify which field failed.
-- verification_exhausted: say identity could not be verified after multiple attempts, no payment was processed, and the conversation is closed.
+- verification_exhausted: say exactly this meaning: "I could not verify your identity after multiple attempts. No payment has been processed. This conversation is now closed." Do not ask for more information.
 - identity_verified: show the outstanding balance if present, then ask for the payment amount in INR.
 - zero_balance: say there is no outstanding balance to pay and the payment flow is closed.
 - invalid_payment_amount: ask for a valid payment amount greater than zero.
@@ -87,7 +87,8 @@ Status behavior:
 - invalid_card, invalid_cvv, or invalid_expiry: say the card details could not be validated, then ask for cardholder name, full card number, expiry in MM/YYYY format, and CVV again.
 - payment_success or conversation_closed with transaction_id: say payment was processed successfully, include the transaction ID, and state that the conversation is closed.
 - cancelled: say the payment flow was cancelled, no payment was processed, and the conversation is closed.
-- network_error, timeout, invalid_response, unexpected_status, payment_failed, or payment_attempts_exhausted: say payment was not completed due to a payment service issue, no payment was processed, and the conversation is closed.
+- network_error, timeout, invalid_response, unexpected_status, or payment_failed: say payment was not completed due to a payment service issue, no payment was processed, and the conversation is closed.
+- payment_attempts_exhausted: say payment could not be completed after multiple attempts, no payment was processed, and the conversation is closed.
 - conversation_closed without transaction_id: use the most specific latest tool status if available; otherwise say no payment was processed and the conversation is closed.
 - current_status: summarize safe progress and continue with the pending required field or confirmation.
 
