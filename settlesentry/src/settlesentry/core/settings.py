@@ -66,7 +66,8 @@ class LoggingConfig(BaseProjectSettings):
 
 
 class APIConfig(BaseProjectSettings):
-    """External API configuration for the Prodigal payment verification API."""
+    """External API configuration for the test/sample payment verification API."""
+
     # External API timeout/retry settings. Payment processing intentionally
     # avoids automatic retry in the client.
 
@@ -84,9 +85,10 @@ class LLMConfig(BaseProjectSettings):
     """
     Optional OpenRouter configuration.
 
-    Keep disabled by default so the assignment remains deterministic and runnable
+    Keep disabled by default so the LLM agent remains deterministic and runnable
     without external LLM setup.
     """
+
     # LLM is optional. Local mode and deterministic tests must work without
     # OPENROUTER_API_KEY.
 
@@ -106,6 +108,7 @@ class AgentPolicyConfig(BaseProjectSettings):
     """
     Operational policy for the payment collection agent.
     """
+
     # Central place for retry limits and policy toggles; nodes should read policy
     # values from here, not hardcode them.
 

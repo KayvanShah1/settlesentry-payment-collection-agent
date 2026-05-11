@@ -17,7 +17,7 @@ logger = get_logger("Agent")
 
 class Agent:
     """
-    Assignment-facing agent interface.
+    Multi-turn agent-customer interface.
     """
 
     def __init__(

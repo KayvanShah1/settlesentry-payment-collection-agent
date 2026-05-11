@@ -96,7 +96,7 @@ def build_agent(mode: AgentMode):
 
 
 def validate_agent_response(response: dict) -> str:
-    """Validate assignment response contract: {'message': non-empty str}."""
+    """Validate interface response contract: {'message': non-empty str}."""
     if not isinstance(response, dict):
         raise ValueError(f"Agent.next() returned {type(response).__name__}; expected dict.")
 

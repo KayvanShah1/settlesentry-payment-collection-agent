@@ -54,9 +54,9 @@ def make_agent() -> Agent:
     )
 
 
-# Public interface tests: these mirror how the assignment evaluator calls
+# Public interface tests: these mirror how the agent interface and evaluator calls
 # Agent.next().
-def test_agent_next_returns_required_assignment_shape():
+def test_agent_next_returns_required_interface_shape():
     agent = make_agent()
 
     response = agent.next("Hi")

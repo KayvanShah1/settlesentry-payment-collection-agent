@@ -66,7 +66,7 @@ def print_turn(role: str, message: str) -> None:
 
 def response_message(response: dict[str, str]) -> str:
     """
-    Validate the assignment response shape and return the user-facing message.
+    Validate the interface response shape and return the user-facing message.
     """
     if not isinstance(response, dict):
         raise TypeError(f"Agent.next() must return dict, got {type(response).__name__}")
@@ -92,7 +92,7 @@ def print_run_header(agent_mode: AgentMode, mode: str) -> None:
     else:
         print("Using deterministic parser/responder and sequential card collection.")
 
-    print("Payment lookup/payment calls still use the configured assignment payment API.")
+    print("Payment lookup/payment calls still use the configured sample/test payment API.")
 
 
 def run_happy_path(agent_mode: AgentMode) -> None:
