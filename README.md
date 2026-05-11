@@ -20,7 +20,7 @@ The core design principle is separation of conversation intelligence from paymen
 - LLMs can be used progressively: for parsing, response phrasing, or autonomous tool orchestration.
 - Even in autonomous mode, the LLM does not own payment authority; it can only call phase-scoped tools backed by deterministic operations and policy checks.
 
-![SettleSentry payment illustration](docs/img/stock_image.jpg)
+![SettleSentry payment illustration](docs/img/settlesentry-checkout-ui-hero.jpg)
 
 ## Why It Matters
 
