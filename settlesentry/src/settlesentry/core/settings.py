@@ -73,7 +73,7 @@ class APIConfig(BaseProjectSettings):
 
     base_url: str = Field(
         default="https://se-payment-verification-api.service.external.usea2.aws.prodigaltech.com",
-        description="Base URL for the Prodigal payment verification API",
+        description="Base URL for the external sample payment verification API",
     )
     timeout_seconds: int = Field(default=30, ge=1, le=120, description="Timeout for API requests in seconds")
     max_retries: int = Field(default=2, ge=0, le=5, description="Maximum number of retries for API requests")

@@ -431,7 +431,7 @@ The implementation makes the following assumptions:
 - The account balance represents an outstanding payable amount for the customer account.
 - Card details are collected only as the payment method for that outstanding balance.
 - This implementation does not assume the account itself is a credit card account.
-- Partial payments are allowed by default, matching the provided API behavior.
+- Partial payments are allowed by default, matching the hosted sample API behavior.
 - Zero-balance accounts are closed without collecting payment unless policy configuration changes.
 - Local schemas validate payment amount and card structure before payment processing.
 - The payment API may still reject card, CVV, expiry, amount, balance, or service-level failures.

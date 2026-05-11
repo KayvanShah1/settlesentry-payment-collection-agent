@@ -23,11 +23,11 @@ We are specifically evaluating:
 Build an AI agent that conducts the following flow with a user over chat:
 
 1. Greet the user and prompt for their account ID
-2. Look up the account via the provided API
+2. Look up the account via the hosted sample API
 3. Collect identity information and verify the user (see Verification Requirements)
 4. Share the outstanding balance with the verified user
 5. Collect card payment details
-6. Process the payment via the provided API
+6. Process the payment via the hosted sample API
 7. Communicate the outcome clearly (success with transaction ID, or failure with reason)
 8. Recap and close the conversation
 

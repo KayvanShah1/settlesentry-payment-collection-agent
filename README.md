@@ -152,7 +152,7 @@ Full template: [`.env.example`](.env.example)
 | `OPENROUTER_TEMPERATURE` | No | `0.0` | LLM temperature for response variability. |
 | `OPENROUTER_MAX_TOKENS` | No | `300` | Max tokens for LLM outputs. |
 | `OPENROUTER_RETRIES` | No | `1` | Retry count for LLM calls. |
-| `API_BASE_URL` | No | `https://se-payment-verification-api.service.external.usea2.aws.prodigaltech.com` | External payment/lookup API base URL. |
+| `API_BASE_URL` | No | `https://example-payment-verification-api.local` | External payment/lookup API base URL. |
 | `API_TIMEOUT_SECONDS` | No | `30` | API timeout in seconds. |
 | `API_MAX_RETRIES` | No | `2` | Retry count for API calls. |
 | `AGENT_POLICY_VERIFICATION_MAX_ATTEMPTS` | No | `3` | Max identity verification attempts before closure. |
@@ -340,7 +340,7 @@ Full happy-path, failure, retry, side-question, correction, and closure examples
 * [Evaluation Approach](docs/EVALUATION.md)
 * [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md)
 * [Autonomous Agent Mode](docs/AUTONOMOUS_MODE.md)
-* [Engineering Issue Log](docs/IMPLEMENTATION_NOTES.md)
+* [Implemenatation Notes](docs/IMPLEMENTATION_NOTES.md)
 * [Package Layout](settlesentry/README.md)
 
 ## Disclaimer

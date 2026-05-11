@@ -1,8 +1,8 @@
-# SettleSentry Development Issue Log and Resolution Gist
+# Implementation Notes
 
 This document summarizes the major issues encountered during the development of the SettleSentry payment collection agent, why they happened, how they were fixed, and what each issue taught us about designing regulated conversational agents.
 
-It is written as an engineering handoff/postmortem rather than a commit log. It covers the broader project lifecycle across the deterministic workflow, LLM-assisted modes, evaluator design, safety/redaction work, and the final autonomous tool-calling branch.
+It is written as an engineering handoff/postmortem rather than a commit log. It covers the broader project lifecycle across the deterministic workflow, LLM-assisted modes, evaluator design, safety/redaction work, and the autonomous tool-calling mode.
 
 ---
 
@@ -92,7 +92,7 @@ There was concern that parts of the workflow had been manually implemented even 
 Questions came up around whether memory, checkpointing, graph routing, tool-calling, and evaluation should have been handled through LangGraph earlier.
 
 ### Root Cause
-The first submission prioritized correctness and policy control. LangGraph was used for workflow structure, but not yet as a full native agent/tool-calling runtime.
+The initial implementation prioritized correctness and policy control. LangGraph was used for workflow structure, but not yet as a full native agent/tool-calling runtime.
 
 ### Resolution
 The project evolved toward a clearer split:
@@ -687,7 +687,7 @@ The most important engineering decisions were:
 - audit LLM-written final responses
 - build an evaluator that catches premature payment calls, privacy leaks, failed recovery, and terminal closure issues
 
-The hardest failures were not simple coding bugs. They were boundary failures:
+The hardest failures were not simple coding bugs. They were contract failures:
 - LLM skipped a tool call
 - tool surface exposed the wrong action
 - prompt was too broad at a critical phase
