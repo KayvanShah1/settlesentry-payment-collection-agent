@@ -338,9 +338,10 @@ Full happy-path, failure, retry, side-question, correction, and closure examples
 
 * [Design Document](docs/DESIGN.md)
 * [Evaluation Approach](docs/EVALUATION.md)
-* [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md)
 * [Autonomous Agent Mode](docs/AUTONOMOUS_MODE.md)
-* [Implemenatation Notes](docs/IMPLEMENTATION_NOTES.md)
+* [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md)
+* [Implementation Notes](docs/IMPLEMENTATION_NOTES.md)
+* [Design Rationale](docs/notes/DESIGN_RATIONALE.md)
 * [Package Layout](settlesentry/README.md)
 
 ## Disclaimer

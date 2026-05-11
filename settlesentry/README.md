@@ -74,4 +74,3 @@ settlesentry/
 - [Design Document](../docs/DESIGN.md)
 - [Evaluation Approach](../docs/EVALUATION.md)
 - [Sample Conversations](../docs/SAMPLE_CONVERSATIONS.md)
-- [Scenario Specification](../docs/references/SCENARIO_SPEC.md)

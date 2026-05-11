@@ -99,7 +99,7 @@ The project evolved toward a clearer split:
 - Modes 1–3: graph-controlled workflow with parser/responder variants.
 - Mode 4: autonomous LangGraph/PydanticAI-style tool orchestration over guarded operations.
 
-Mode 4 was treated as a new branch, not a disruptive refactor of the original submission.
+Mode 4 was added as a separate extension path, not a disruptive refactor of the stable workflow modes.
 
 ### Lesson
 For project prototypes, a stable, explainable baseline is more valuable than prematurely adopting every framework feature. Agentic tool calling can be added as an ablation layer once the deterministic core is correct.
@@ -565,7 +565,7 @@ Stricter redaction changed logger expectations.
 Tests failed because `account_id=ACC1001` became masked.
 
 ### Root Cause
-Security boundary changed, tests still reflected old policy.
+Security policy changed, tests still reflected old policy.
 
 ### Resolution
 Updated tests to expect redacted account ID in logs and nested payloads.
@@ -591,7 +591,7 @@ Docs referenced:
 ### Root Cause
 Mode 4 introduced autonomous tool orchestration, new mode names, and new evaluator commands, but docs were not updated immediately.
 
-### Resolution Needed
+### Resolution
 Update docs to reflect:
 - four modes
 - new mode names
