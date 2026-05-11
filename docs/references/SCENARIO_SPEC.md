@@ -1,4 +1,4 @@
-# TAKE-HOME ASSIGNMENT
+# SettleSentry Scenario Specifications
 > Build a Production-Ready Payment Collection AI Agent
 
 > **Role:** Agent Engineer  
@@ -324,4 +324,4 @@ In `README` or a separate file:
 
 Submit a link to a GitHub repository (public or shared with us) containing all deliverables.
 
-If anything in this assignment is unclear, document your assumptions in your design document. We expect some ambiguity — how you handle it is part of the evaluation.
+If anything in this scenario specification is unclear, document your assumptions in your design document. We expect some ambiguity — how you handle it is part of the evaluation.

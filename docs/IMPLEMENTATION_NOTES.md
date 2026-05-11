@@ -6,7 +6,7 @@ It is written as an engineering handoff/postmortem rather than a commit log. It 
 
 ---
 
-## 1. Assignment Scope and Product Semantics
+## 1. Reference Specification Scope and Product Semantics
 
 ### Issue
 Early in the project, the core product semantics needed clarification: what does the provided `balance` mean, when can it be disclosed, and whether payment should be attempted for zero-balance accounts.
@@ -15,7 +15,7 @@ Early in the project, the core product semantics needed clarification: what does
 There was ambiguity around whether the account balance represented an available balance, outstanding balance, credit card balance, or payable amount.
 
 ### Root Cause
-The assignment used a generic `Balance` field in sample account data, but the business flow was a payment collection workflow. Treating balance as a bank/card available balance would create incorrect product behavior.
+The reference specification used a generic `Balance` field in sample account data, but the business flow was a payment collection workflow. Treating balance as a bank/card available balance would create incorrect product behavior.
 
 ### Resolution
 The system interpreted `balance` as an **outstanding payable amount** and consistently used the phrase **outstanding balance** in customer-facing responses.
@@ -40,7 +40,7 @@ The agent needed to enforce strict identity verification before showing the outs
 Early workflow design needed to decide whether a name alone was sufficient or whether secondary verification was mandatory.
 
 ### Root Cause
-The assignment provided multiple identity fields: full name, DOB, Aadhaar last 4, and pincode. A safe payment collection flow should not disclose balance after only an account ID or name.
+The reference specification provided multiple identity fields: full name, DOB, Aadhaar last 4, and pincode. A safe payment collection flow should not disclose balance after only an account ID or name.
 
 ### Resolution
 Implemented strict two-part verification:
@@ -57,7 +57,7 @@ Identity verification should be deterministic and auditable. LLMs can extract fi
 ## 3. Mode 1–3 Baseline Architecture
 
 ### Issue
-Initial implementation needed to satisfy the assignment while also being easy to explain and evaluate.
+Initial implementation needed to satisfy the reference specification while also being easy to explain and evaluate.
 
 ### Symptom
 The implementation grew several layers: parser, workflow graph, policy checks, response writer, API client, security logging, evaluator, and tests.
@@ -102,7 +102,7 @@ The project evolved toward a clearer split:
 Mode 4 was treated as a new branch, not a disruptive refactor of the original submission.
 
 ### Lesson
-For take-home projects, a stable, explainable baseline is more valuable than prematurely adopting every framework feature. Agentic tool calling can be added as an ablation layer once the deterministic core is correct.
+For project prototypes, a stable, explainable baseline is more valuable than prematurely adopting every framework feature. Agentic tool calling can be added as an ablation layer once the deterministic core is correct.
 
 ---
 

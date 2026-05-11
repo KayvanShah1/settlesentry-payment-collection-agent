@@ -20,7 +20,7 @@ The core design principle is separation of conversation intelligence from paymen
 - LLMs can be used progressively: for parsing, response phrasing, or autonomous tool orchestration.
 - Even in autonomous mode, the LLM does not own payment authority; it can only call phase-scoped tools backed by deterministic operations and policy checks.
 
-![SettleSentry payment workflow illustration](docs/img/stock_image.jpg)
+![SettleSentry payment illustration](docs/img/stock_image.jpg)
 
 ## Why It Matters
 
@@ -88,7 +88,7 @@ SettleSentry keeps payment authority outside the LLM:
 * Full card number and CVV are cleared after success, terminal failure, cancellation, or closure.
 * Out-of-order user input may be remembered, but policy gates still control sensitive actions.
 
-For detailed safety rules and workflow decisions, see [Design Document](docs/DESIGN.md).
+For detailed safety rules and workflow decisions, see [Design Document](docs/DESIGN.md#6-safety-rules).
 
 ## Modes
 
@@ -340,8 +340,7 @@ Full happy-path, failure, retry, side-question, correction, and closure examples
 * [Evaluation Approach](docs/EVALUATION.md)
 * [Sample Conversations](docs/SAMPLE_CONVERSATIONS.md)
 * [Autonomous Agent Mode](docs/AUTONOMOUS_MODE.md)
-* [Engineering Issue Log](docs/DEVELOPMENT_ISSUES.md)
-* [Assignment Instructions](docs/instructions/ASSIGNMENT.md)
+* [Engineering Issue Log](docs/IMPLEMENTATION_NOTES.md)
 * [Package Layout](settlesentry/README.md)
 
 ## Disclaimer
@@ -351,7 +350,7 @@ SettleSentry is a technical implementation and reference architecture for a paym
 A production deployment would require additional security review, PCI-DSS controls, secrets management, persistent session storage, monitoring, audit logging, human escalation, fraud controls, and compliance validation.
 
 > [!CAUTION]
-> Do not use real payment card data with this project. Use only assignment-provided or test payment data.
+> Do not use real payment card data with this project. Use only sample or test payment data.
 
 ## License
 

@@ -15,7 +15,7 @@ Safety behavior remains consistent across modes:
 - closed conversations do not continue payment collection
 
 > [!Note]
-> All values shown below are assignment/test values only.
+> All values shown below are sample/test values only.
 
 ## 1. Successful Payment
 

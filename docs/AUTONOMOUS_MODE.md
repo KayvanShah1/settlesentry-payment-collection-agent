@@ -148,7 +148,7 @@ Rules:
 * corrected amount during confirmation must call the amount-correction tool
 * payment success can be claimed only when a transaction ID is returned
 
-## Safety Boundaries
+## Safety Controls
 
 Autonomous mode keeps the LLM inside a constrained action space.
 

@@ -258,7 +258,105 @@ flowchart TD
     O -->|Network / Timeout / Ambiguous Service Failure| O5[Close Safely Without Payment]
 ```
 
-## 6. Generic Turn Sequence
+## 6. Safety Rules
+
+SettleSentry treats payment collection as a controlled workflow, not an open-ended chat. The LLM may help interpret user input, phrase responses, or select an allowed tool in autonomous mode, but payment-critical decisions remain enforced by structured state, deterministic operations, and policy gates.
+
+### Account and session rules
+
+- Each user message is processed as one controlled workflow turn.
+- The conversation must be open before any workflow action can proceed.
+- Account lookup requires an explicit account ID.
+- Account IDs are treated as opaque identifiers and must not be guessed, corrected, or inferred by the LLM.
+- If the customer changes the account ID, downstream identity, amount, card, confirmation, and payment context must be cleared.
+- Closed conversations must not continue the payment flow.
+
+### Identity verification rules
+
+- Identity verification is required before balance disclosure.
+- Verification requires an exact full-name match and one exact secondary factor match.
+- Accepted secondary factors are DOB, Aadhaar last 4 digits, or pincode.
+- The LLM must not independently verify identity.
+- The system must not reveal which verification factor failed.
+- Failed verification inputs are cleared before retry.
+- Verification attempts are limited by policy.
+- If verification attempts are exhausted, the conversation closes without balance disclosure or payment collection.
+
+### Balance disclosure rules
+
+- Outstanding balance can be shown only after successful identity verification.
+- Balance must not be shown during account lookup, failed verification, side questions, or unsafe states.
+- Zero-balance accounts close without collecting payment unless policy explicitly allows otherwise.
+- Balance is treated as a safe response fact only after verification succeeds.
+
+### Payment amount rules
+
+- Payment amount can be collected only after identity verification.
+- Amount must be positive.
+- Amount must not exceed the outstanding balance unless policy explicitly allows it.
+- Amount must respect any configured maximum payment limit.
+- Invalid amounts are blocked before card collection.
+- Correcting the amount after confirmation resets the confirmation state and requires reconfirmation.
+
+### Card collection rules
+
+- Card details can be collected only after a valid payment amount is accepted.
+- Required card fields are cardholder name, card number, expiry, and CVV.
+- Card submission is not payment confirmation.
+- Full card number and CVV must never be repeated in user-facing responses.
+- If payment processing rejects card details, the full card bundle is cleared and must be collected again.
+- Full card number and CVV are cleared after success, cancellation, terminal failure, or safe closure.
+
+### Confirmation rules
+
+- Payment processing requires explicit customer confirmation.
+- Ambiguous replies must not trigger payment.
+- If the customer says no, cancel, stop, or refuses confirmation, the conversation closes without payment.
+- If the customer changes the amount during confirmation, the system must validate the new amount and ask for confirmation again.
+- The system must not treat card submission, amount entry, or general intent to pay as final confirmation.
+
+### Payment execution rules
+
+- Payment API execution is allowed only after:
+  - account lookup has succeeded
+  - identity has been verified
+  - payment amount is valid
+  - card details are complete
+  - explicit confirmation is present
+  - final policy checks pass
+- The LLM must not directly call external payment APIs.
+- Payment execution must go through deterministic workflow operations.
+- Payment success can be claimed only when the payment API returns a transaction ID.
+- Network errors, timeouts, invalid responses, or ambiguous service failures close safely instead of retrying automatically.
+
+### Autonomous mode rules
+
+- Autonomous mode uses controlled API access, not open-ended tool access.
+- The LLM can select only from tools exposed for the current workflow phase.
+- Phase-scoped tools must prevent payment processing before account lookup, verification, amount validation, card collection, and confirmation.
+- Every autonomous tool call delegates to deterministic workflow operations.
+- Every payment-critical operation still passes through policy gates.
+- The LLM receives privacy-safe memory, not raw sensitive state.
+- LLM-written responses must pass safety audit before being returned.
+- Unsafe, incomplete, vague, or failed LLM responses fall back to deterministic response generation.
+
+### Response safety rules
+
+- User-facing responses must be generated from safe workflow context only.
+- Responses must not expose DOB, Aadhaar digits, pincode, full card number, CVV, raw account details, internal policy state, tool internals, stack traces, or provider errors.
+- The system must not claim identity verification, payment readiness, or payment success unless those facts are present in structured state or tool results.
+- Side questions may be answered only when doing so does not reveal sensitive information or bypass the pending workflow step.
+- The response should clearly ask for the next required field when progress is blocked.
+
+### Logging, debugging, and evaluation safety rules
+
+- Logs and evaluator traces must redact sensitive identity and payment data.
+- Redacted traces may include workflow step, payment amount, confirmation status, completion status, and payment-call count.
+- Debug output must not expose DOB, Aadhaar digits, pincode, full card number, CVV, raw account payloads, internal policy state, or stack traces to the user.
+- Evaluations must check privacy leaks, premature payment calls, confirmation-gate behavior, amount guardrails, recovery behavior, correction handling, and safe closure.
+- A release is not evaluation-ready if any scenario reveals sensitive values, calls payment before confirmation, discloses balance before verification, or continues after terminal closure.
+
+## 7. Generic Turn Sequence
 
 This sequence describes how any user turn is processed. It is not limited to the happy path.
 
@@ -316,7 +414,7 @@ sequenceDiagram
     Interface-->>User: Return {"message": "..."}
 ```
 
-## 7. Assumptions
+## 8. Assumptions
 
 The implementation makes the following assumptions:
 
@@ -342,7 +440,7 @@ The implementation makes the following assumptions:
 - Cardholder name, full card number, expiry, and CVV are cleared after success, terminal failure, cancellation, or closure.
 - LLM behavior is optional and must not be required for deterministic local execution.
 
-## 8. Key Design Decisions
+## 9. Key Design Decisions
 
 ### LLM is bounded, not authoritative
 
@@ -390,7 +488,7 @@ User-facing responses are generated from safe workflow context only.
 
 Sensitive verification data, full card number, CVV, raw account details, and internal policy/tool information are not exposed.
 
-## 9. Tradeoffs
+## 10. Tradeoffs
 
 ### More structured than a free-form assistant
 
@@ -408,11 +506,11 @@ A graph-based workflow is more structured than a procedural loop. The tradeoff i
 
 The current implementation keeps state within one active session. A production deployment would likely persist session state externally for durability, recovery, and horizontal scaling.
 
-### Full card handling is for assignment simulation only
+### Full card handling is for scenario-based simulation only
 
 The implementation accepts test card details to exercise the payment workflow. A production system should use a PCI-DSS aligned payment-provider handoff or tokenization flow instead of directly handling raw card data.
 
-## 10. Future Improvements
+## 11. Future Improvements
 
 Future improvements could include:
 

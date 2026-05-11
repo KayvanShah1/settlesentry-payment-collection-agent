@@ -1,6 +1,6 @@
-Based on the Prodigal assignment, the strongest implementation is a **deterministic, production-style payment collection agent**, not a heavy LangChain/LlamaIndex/MCP/RAG system.
+Based on the reference specification, the strongest implementation is a **deterministic, production-style payment collection agent**, not a heavy LangChain/LlamaIndex/MCP/RAG system.
 
-The assignment is mainly evaluating **state machine design, context handling, strict verification, tool calling, structured outputs, and failure handling** through the exact `Agent.next(user_input: str) -> dict` interface. Adding OpenRouter, LangChain, Mongo Atlas, FAISS, or RAG would likely make the solution look over-engineered and less deterministic for their automated evaluator. 
+The reference specification is mainly evaluating **state machine design, context handling, strict verification, tool calling, structured outputs, and failure handling** through the exact `Agent.next(user_input: str) -> dict` interface. Adding OpenRouter, LangChain, Mongo Atlas, FAISS, or RAG would likely make the solution look over-engineered and less deterministic for their automated evaluator. 
 
 ## Best implementation direction
 
@@ -64,7 +64,7 @@ PaymentIntent
 ToolResult
 ```
 
-Reason: the assignment explicitly expects validated API payloads and structured outputs. Pydantic gives you strong boundaries and clean validation before API calls.
+Reason: the reference specification explicitly expects validated API payloads and structured outputs. Pydantic gives you strong boundaries and clean validation before API calls.
 
 Use validators for:
 
@@ -232,7 +232,7 @@ The agent should:
 6. avoid re-asking for name/DOB
 ```
 
-This is one of the biggest scoring areas. The assignment explicitly mentions out-of-order information and avoiding re-asking for data already provided. 
+This is one of the biggest scoring areas. The reference specification explicitly mentions out-of-order information and avoiding re-asking for data already provided. 
 
 ## Parsing approach
 
@@ -288,11 +288,11 @@ I’m unable to verify your identity after multiple attempts, so I can’t conti
 
 Do not reveal which field was wrong.
 
-## Payment policy for this assignment
+## Payment policy
 
-For the take-home assignment, do **not** introduce human intervention into the actual flow. Their evaluator expects the agent to process valid payments through the API after verification.
+For the exercise, do **not** introduce human intervention into the actual flow. Their evaluator expects the agent to process valid payments through the API after verification.
 
-Assignment policy:
+Intended policy:
 
 ```text
 Allowed:
@@ -319,7 +319,7 @@ Production policy can be mentioned in `DESIGN.md` as future work, but not implem
 Example production note:
 
 ```text
-In a real system, high-risk payments, repeated failed cards, suspicious identity attempts, or payment amounts above a configured threshold would be routed to human review. For this assignment, the flow remains fully automated after strict verification because the required interface has no reviewer channel and the API is designed for direct payment processing.
+In a real system, high-risk payments, repeated failed cards, suspicious identity attempts, or payment amounts above a configured threshold would be routed to human review. For this reference specification, the flow remains fully automated after strict verification because the required interface has no reviewer channel and the API is designed for direct payment processing.
 ```
 
 ## Payment edge cases to handle
@@ -432,7 +432,7 @@ aadhaar_last4_provided = "***"
 
 ## Metrics to mention in design doc
 
-For this assignment, keep metrics practical:
+For this project, keep metrics practical:
 
 ```text
 Conversation completion rate
@@ -462,7 +462,7 @@ No payment API call should ever happen before verification.
 
 ## Evaluation framework
 
-Do not use RAGAS here. RAGAS is for RAG evaluation. This assignment has no retrieval, grounding, chunk recall, or document answering.
+Do not use RAGAS here. RAGAS is for RAG evaluation. This project has no retrieval, grounding, chunk recall, or document answering.
 
 Use a custom deterministic eval runner.
 
@@ -632,7 +632,7 @@ Suggested structure:
 Key design decision to explicitly state:
 
 ```text
-I chose a deterministic state machine over an LLM-driven orchestration framework because the assignment requires strict verification, reproducible behavior, and an exact Agent.next() interface for automated evaluation.
+I chose a deterministic state machine over an LLM-driven orchestration framework because the scenario specification requires strict verification, reproducible behavior, and an exact Agent.next() interface for automated evaluation.
 ```
 
 That sentence will land well.
@@ -693,7 +693,7 @@ This directly maps to what Prodigal says they are evaluating: context management
 
 You are right. In the previous answer, I described the **supporting system**, but I did not explicitly show the **agent loop**.
 
-For this assignment, the **agent is the `Agent` class itself**. It is not necessarily a LangChain/OpenRouter-style autonomous LLM agent. It is a **conversation-state agent** that:
+For this project scenario, the **agent is the `Agent` class itself**. It is not necessarily a LangChain/OpenRouter-style autonomous LLM agent. It is a **conversation-state agent** that:
 
 ```text
 observes user input
@@ -707,7 +707,7 @@ observes user input
 
 That is the agent.
 
-The assignment explicitly requires this interface:
+The scenario specification explicitly requires this interface:
 
 ```python
 class Agent:
@@ -834,7 +834,7 @@ A plain state machine says:
 If state = WAITING_FOR_NAME, ask for name.
 ```
 
-A proper agent for this assignment does more:
+A proper agent for this project scenario does more:
 
 ```text
 User: "Hi, I am Nithin Jain, account ACC1001, DOB 1990-05-14"
@@ -932,7 +932,7 @@ def _decide_next_action(self) -> AgentAction:
 
 ## Should you use an LLM agent?
 
-For this assignment: **no, not as the core controller**.
+For this project scenario: **no, not as the core controller**.
 
 Because Prodigal’s evaluator will call `Agent.next()` and expect deterministic behavior. An LLM can introduce:
 
@@ -989,7 +989,7 @@ For Prodigal, the strongest submission is a **deterministic tool-using payment c
 
 ---
 
-OpenRouter is **not strictly needed** to pass the assignment.
+OpenRouter is **not strictly needed** to pass the project evaluation.
 
 But yes, since this is for an **Agent Engineer** role, using an LLM can make the submission look more aligned **only if you use it safely**.
 
@@ -1071,7 +1071,7 @@ policy decisions
 final source of truth for state
 ```
 
-Those must remain deterministic because the assignment has hard rules: no payment before verification, strict matching, no sensitive data exposure, validated API payloads, and consistent behavior across repeated `Agent.next()` calls. 
+Those must remain deterministic because the scenario specification has hard rules: no payment before verification, strict matching, no sensitive data exposure, validated API payloads, and consistent behavior across repeated `Agent.next()` calls. 
 
 ## Recommended implementation
 
@@ -1108,7 +1108,7 @@ OpenRouter’s API is OpenAI-compatible and supports structured output modes lik
 
 ## Why OpenRouter should not control tools directly
 
-OpenRouter also supports tool-calling style parameters, but for this assignment I would **not** let the model call tools directly. ([OpenRouter][3])
+OpenRouter also supports tool-calling style parameters, but for this project scenario I would **not** let the model call tools directly. ([OpenRouter][3])
 
 Reason:
 
@@ -1127,7 +1127,7 @@ Payment collection is a regulated, sensitive workflow. Your reviewer will care m
 In your design doc, say:
 
 ```text
-The agent uses OpenRouter as an optional LLM-based understanding layer to convert natural user messages into structured fields. However, all verification, policy enforcement, state transitions, payment authorization, and API tool calls are handled deterministically in Python. This keeps the agent conversational while preserving safety, reproducibility, and strict compliance with the assignment rules.
+The agent uses OpenRouter as an optional LLM-based understanding layer to convert natural user messages into structured fields. However, all verification, policy enforcement, state transitions, payment authorization, and API tool calls are handled deterministically in Python. This keeps the agent conversational while preserving safety, reproducibility, and strict compliance with the scenario specification rules.
 ```
 
 That is the right balance.
@@ -1155,7 +1155,7 @@ This shows production maturity.
 
 ## Should MCP be used?
 
-No, not for the assignment core.
+No, not for the project core.
 
 MCP makes sense when you have many tools, external systems, and standardized tool discovery. Here you only have two APIs:
 
@@ -1169,7 +1169,7 @@ Adding MCP would add setup complexity without improving the evaluator’s experi
 Mention it as future work:
 
 ```text
-In a larger production deployment, the account lookup and payment APIs could be exposed through an MCP server so multiple agents or clients can discover and invoke tools consistently. For this take-home, I used a direct typed tool layer to keep the required Agent.next() interface deterministic and easy to evaluate.
+In a larger production deployment, the account lookup and payment APIs could be exposed through an MCP server so multiple agents or clients can discover and invoke tools consistently. For this project prototype, I used a direct typed tool layer to keep the required Agent.next() interface deterministic and easy to evaluate.
 ```
 
 ## Final recommendation

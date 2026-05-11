@@ -148,7 +148,7 @@ By default, only the latest 10 evaluation text reports are retained.
 uv run python scripts/evaluate_agent.py --all --exhaustive
 ```
 
-Latest exhaustive snapshot (see [evaluation sample](evaluation_sample.md)):
+Latest exhaustive snapshot (see [evaluation sample](./EVALUATION_SAMPLE.md)):
 
 | Mode | Passed / Total | Success Rate | Notes |
 |---|---:|---:|---|
